@@ -1,0 +1,348 @@
+#### AMF project - diversity and community composition from DOK trial, field season 2017
+
+---
+title: "AMF project - DADA2 workflow"
+author: "Katja Kozjek"
+date: "05/09/2019"
+output: pdf_document
+---
+
+#### Load packages 
+```{r}
+
+#clean everything  
+#rm(list=ls())
+
+#libraries
+library(dada2); packageVersion("dada2")
+library(vegan); packageVersion("vegan")
+library(devtools); packageVersion("devtools")
+library(DECIPHER); packageVersion("DECIPHER")
+library(phyloseq); packageVersion("phyloseq")
+library(ggplot2); packageVersion("ggplot2")
+library(microbiome); packageVersion("microbiome")
+library(data.table); packageVersion("data.table")
+library(ape); packageVersion("ape")
+library(S4Vectors); packageVersion("S4Vectors")
+
+```
+
+##### DADA2 workflow
+```{r}
+
+##path
+path <- "/Users/Katja/Box Sync/PhD Lund Katja/Sequencing/PacBio AMF/Sequencing data AMF/dada2/AMF_DOK trial/samples"
+list.files(path) #listing all files in the path
+fnFs <- sort(list.files(path, pattern=".fq", full.names = TRUE)) #selection of all fastq files
+sample.names <- sapply(strsplit(basename(fnFs), "_"), `[`, 2)
+sample.names
+
+##read quality profiles 
+plotQualityProfile(fnFs) #general command
+
+##read separate files 
+plotQualityProfile(fnFs[1:24]) #samples from 1-24
+plotQualityProfile(fnFs[24:48]) #samples from 24-48
+
+#tiff format for plot 
+#tiff('rplot1-24.tiff',res=300,units='px', width=2100, height=1800,  pointsize=6) 
+#plotQualityProfile(fnFs[1:24])
+#dev.off()
+
+##filter and trim 
+#place filtered files in filtered/ subdirectory 
+filt_path <- file.path(path, "filtered") 
+filtFs <- file.path(path, "filtered", paste0(sample.names, "_filt.fq.gz"))
+names(filtFs) <- sample.names
+
+#filtering parameters FINAL code
+#for WINDOWS multithread=FALSE
+#nominal definition of the quality score EE=sum(10^(-Q/10))
+out <- filterAndTrim(fnFs, filtFs, maxN=0, rm.phix=TRUE, compress=TRUE, multithread=FALSE, trimLeft=25, trimRight=25, truncQ=20, maxEE=2)
+
+head(out) #to see how many: reads.in and reads.out 
+write.csv(out, "/Users/Katja/Box Sync/PhD Lund Katja/Sequencing/PacBio AMF/Sequencing data AMF/dada2/AMF_DOK trial/results/filter_out.csv") #write csv file, save it 
+#csv file containing number of input sequences and output sequences 
+# % of obtained reads is from 76-79%
+
+#again, check the quality 
+plotQualityProfile(filtFs)
+
+##error rates
+errF <- learnErrors(filtFs, multithread=TRUE, nbases=1e+09) 
+#we incorporate higher number of sample by increasing the minimum number of bases 
+#112731868 total bases in 372735 reads from 48 samples will be used for learning the error rates
+
+#errF <- learnErrors(filtFs, multithread=TRUE), general function
+plotErrors(errF, nominalQ=TRUE) #error rates for each possible transition 
+#red line shows the error rates, the estimated error rates (black line) are a good fit to the observed rates (points), error rates should drop with the increased quality 
+
+#out: 48 samples
+
+##dereplication of identical reads 
+derepFs <- derepFastq(filtFs, verbose=TRUE)
+names(derepFs) <- sample.names
+
+##infer the sequence variants in each sample
+dadaFs <- dada(derepFs, err=errF, multithread=TRUE) #number of true sequences
+dadaFs[[1]] #only for the first sample
+#help("dada-class")
+
+##construct sequence table (ASV table) 
+seqtab <- makeSequenceTable(dadaFs)
+dim(seqtab)
+#[1] X   Y    X-number of samples, Y-number of ASVs
+#48, 211
+
+table(nchar(getSequences(seqtab))) #distibution of sequence lengths 
+
+##filtering of sequences less than 50 
+seqtab2 <- seqtab[,nchar(colnames(seqtab)) %in% 50:1500]
+dim(seqtab2)
+#48, 202
+#first length-50 is start length and second length-1500 is end length of sequences
+#seqtab2 <- seqtab[,nchar(colnames(seqtab)) %in% 50:1000]
+
+#inspect distribution of sequence lengths for seqtab2
+table(nchar(getSequences(seqtab2)))
+
+##remove chimeras
+seqtab.nochim <- removeBimeraDenovo(seqtab2, method="consensus", multithread=TRUE, verbose=TRUE)
+#3 bimeras out of 202 input sequences
+dim(seqtab.nochim) #chimeras removed 
+#48, 199
+
+sum(seqtab.nochim)/sum(seqtab2)
+#in our case 0.9990761, which means that chimeric sequences are below 0,001 of all seqs = very good
+#what proportion of the sequence variants are chimeras 
+1-sum(seqtab.nochim)/sum(seqtab2)  #0.0009238807
+
+#matrix: rows corresponding to samples, columns with ASV, the value of each entry is the number of times that ASV was observed in the sample
+#here ASV is listed as a sequence 
+write.csv(seqtab.nochim, "/Users/Katja/Box Sync/PhD Lund Katja/Sequencing/PacBio AMF/Sequencing data AMF/dada2/AMF_DOK trial/results/reads_table_final.csv")
+
+##summary
+getN <- function(x) sum(getUniques(x))
+track <- cbind(out, sapply(dadaFs, getN), rowSums(seqtab.nochim))
+colnames(track) <- c("input", "filtered", "denoised", "nonchim")
+rownames(track) <- sample.names
+head(track)
+write.csv(track, "/Users/Katja/Box Sync/PhD Lund Katja/Sequencing/PacBio AMF/Sequencing data AMF/dada2/AMF_DOK trial/results/final_check.csv")
+
+#seqtab.nochim file is the final file, samples and sequences that represents ASVs
+#rarefied species richness
+rarecurve(seqtab.nochim)
+
+#distribution of sequence length 
+plot(sort(unname(rowSums(seqtab.nochim))))
+```
+
+#### END; as next assign TAXONOMY, using DECIPHER algorithm 
+
+#### DECIPHER taxonomy 
+
+```{r}
+
+#upload DECIPHER reference database (UNITE_v2019gz.RData), when it is uploaded it is named as trainingSet
+
+load("/Users/Katja/Box Sync/PhD Lund Katja/Sequencing/PacBio AMF/Sequencing data AMF/dada2/AMF_DOK trial/reference databases/UNITE_v2019gz.RData")
+
+#you have to set seed every time you want to get a reproducible random result
+set.seed(NULL) #return to the original state by unsetting the seed
+set.seed(62) #birth date
+
+AMF_taxa <- DNAStringSet(getSequences(seqtab.nochim))
+AMF_taxa <- RemoveGaps(AMF_taxa)
+View(AMF_taxa)
+
+#assign classification
+ids <- IdTaxa(AMF_taxa, trainingSet, strand="both", threshold=50, bootstraps=100, processors=NULL, verbose=FALSE)
+View(ids) #results 
+
+ranks <- c("kingdom", "phylum", "class", "order", "family", "genus", "species")
+View(ranks)
+
+taxid <- t(sapply(ids, function(x) {
+  m <- match(ranks, x$rank)
+  taxa <- x$taxon[m]
+  taxa[startsWith(taxa, "unclassified_")] <- NA
+  taxa
+}))
+
+colnames(taxid) <- ranks; rownames(taxid) <- getSequences(seqtab.nochim)
+write.csv(taxid, "/Users/Katja/Box Sync/PhD Lund Katja/Sequencing/PacBio AMF/Sequencing data AMF/dada2/AMF_DOK trial/results/decipher_classification_final_2019.csv")
+#bootstrap=100, threshold=50, set.seed=62 
+
+#The output can easily be converted to a character vector with taxonomic information assigned to each sequence
+assignment <- sapply(ids,
+      function(x)
+      paste(x$taxon,
+      collapse=";"))
+write.csv(assignment, "assignment.csv")
+
+plot(ids) #pie chart showing the relative abundance of the taxonomic groups assigned to test sequences
+plot(ids, trainingSet) #including the taxonomic training set 
+
+#classification table, phylum rank is considered 
+phylum <- sapply(ids, function(x) {
+                      w<-which(x$rank=="phylum")
+                      if(length(w) !=1) {
+                      "unknown"
+                       } else {
+                      x$taxon[w]
+                      }
+                      })
+table(phylum)
+write.csv(phylum, "/Users/Katja/Box Sync/PhD Lund Katja/Sequencing/PacBio AMF/Sequencing data AMF/dada2/AMF_DOK trial/results/decipher_classification_phylum.csv")
+
+#to obtain results for order, class, family level function above should be adjusted
+
+#taxon/species level considered
+taxon <- sapply(ids,
+                function(x)
+                x$taxon[length(x$taxon)])
+
+write.csv(taxon, "/Users/Katja/Box Sync/PhD Lund Katja/Sequencing/PacBio AMF/Sequencing data AMF/dada2/AMF_DOK trial/results/decipher_classification_taxon.csv")
+decipher_output <- sapply(ids,
+                         function (id) {
+                         paste(id$taxon,
+                         " (",
+                         round(id$confidence, digits=1),
+                         "%)",
+                         sep="",
+                         collapse="; ")
+})
+
+writeLines(decipher_output,"/Users/Katja/Box Sync/PhD Lund Katja/Sequencing/PacBio AMF/Sequencing data AMF/dada2/AMF_DOK trial/results/decipher_classification_output.csv")
+```
+
+#### PHYLOSEQ
+
+```{r}
+
+OTU = otu_table(seqtab.nochim, taxa_are_rows = FALSE)
+#199 taxa, 48 samples
+TAX = tax_table(taxid)
+
+#current meta file of the project
+#meta file DOK_meta.csv 
+meta_file = read.csv("/Users/Katja/Box Sync/PhD Lund Katja/Sequencing/PacBio AMF/Sequencing data AMF/dada2/Meta files AMF/DOK_meta.csv", sep=",", row.names=1)
+#48 observations, 26 variables 
+meta_file = sample_data(data.frame(meta_file))
+
+physeq_AMF = phyloseq(OTU, TAX, meta_file)
+physeq_AMF
+#OTU_table; 199 taxa, 48 samples
+#tax_table; 199 taxa, by 7 taxonomic ranks
+#meta_file; 48 observations, 28 variables 
+
+meta_file$total_reads <- sample_sums(physeq_AMF) #new column contain the total read count from initial file physeq_AMF
+#phyloseq AMF object has 27 variables 
+
+#library("ape")
+#plot random tree
+random_tree = rtree(ntaxa(physeq_AMF), rooted=TRUE, tip.label=taxa_names(physeq_AMF))
+plot((random_tree))
+
+#add random tree to phyloseq object 
+physeq_AMF =merge_phyloseq(physeq_AMF, meta_file, random_tree)
+physeq_AMF
+
+ntaxa(physeq_AMF) #number of ASV/OTU 
+nsamples(physeq_AMF)
+sample_names(physeq_AMF) #S25,S26...
+sample_variables(physeq_AMF) #such as sample_ID, time_point, treatment
+rank_names(physeq_AMF) #kingdom, phylum, class
+
+
+#taxa_names(physeq_AMF) <- paste0("ASV", seq(ntaxa(physeq_AMF))) #each sequence variant has a name ASV1, etc. 
+#However, the actual sequences are very useful and should be saved for potential future use
+head(taxa_sums(physeq_AMF)) #the total number of individuals observed from each species/taxa/OTU
+
+#library("data.table"); packageVersion("data.table")
+#distribution; how many reads/samples
+
+summarize_phyloseq(physeq_AMF) #package microbiome
+#BiocManager::install("microbiome")
+
+#sequencing depth (how many reads each sample has)
+sdt = data.table(as(sample_data(physeq_AMF), "data.frame"),
+                 TotalReads = sample_sums(physeq_AMF), keep.rownames = TRUE)
+setnames(sdt, "rn", "sampleID")
+pSeqDepth = ggplot(sdt, aes(TotalReads)) + geom_histogram() + ggtitle("Sequencing Depth") + theme_bw() + theme(panel.grid.major = element_blank())
+pSeqDepth
+pSeqDepth + facet_wrap(~treatment)
+
+#taxa total counts
+tdt = data.table(tax_table(physeq_AMF),
+                 TotalCounts = taxa_sums(physeq_AMF),
+                 OTU = taxa_names(physeq_AMF))
+ggplot(tdt, aes(TotalCounts)) + 
+   geom_histogram() + 
+   ggtitle("Histogram of Total Counts")
+
+
+#filtering
+physeq_AMF_0<-subset_taxa(physeq_AMF, !is.na(phylum) & !phylum %in% c ("", "uncharacterized")) #remove NA and unclassified
+#keep 168 ASVs
+
+#compute prevalence of each feature, store as data.frame
+prevdf=apply(X=otu_table(physeq_AMF_0), 
+             MARGIN=ifelse(taxa_are_rows(physeq_AMF_0), yes=1, no=2),
+             FUN=function(x){sum(x>0)})
+
+#add taxonomy and total read frames to this data.frame
+prevdf=data.frame(Prevalence=prevdf,
+                  TotalAbundance=taxa_sums(physeq_AMF_0), tax_table(physeq_AMF_0))
+
+#define phyla to filter
+filterPhyla=c("Basidiomycota", "unidentified")
+
+#filter entries with unidentified phylum
+physeq_AMF_final=subset_taxa(physeq_AMF_0, !phylum %in% filterPhyla)
+physeq_AMF_final
+
+#final dataset physeq_AMF_final, without Basidiomycota, unclassified, unidentified and NA
+#166 ASV-Glomeromycota
+#48 samples
+#28 sample variables
+```
+
+```{r}
+
+rarecurve(otu_table(physeq_AMF_final))
+#remove samples, S31, 45, 84 (the three lowest number of sequences)
+
+remove_sample_physeq_AMF_final <- subset_samples(physeq_AMF_final, sample_ID !=c("S31", "S45", "S84"))
+remove_sample_physeq_AMF_final <- subset_samples(new, sample_ID !="S45")
+rarecurve(otu_table(remove_sample_physeq_AMF_final)) #new phyloseq object contains 45 samples 
+
+#### rarefaction 
+#rarefy the reads, set seed 6020, Innsbruck postal code
+set.seed(NULL)
+set.seed(6020)
+
+#rarefaction on 1616 reads per sample
+new_AMF_rarefied = rarefy_even_depth(remove_sample_physeq_AMF_final, sample.size = min(sample_sums(remove_sample_physeq_AMF_final)), 6020, replace=F, verbose = T)
+#165 ASVs in the final phyloseq object, rarefaction on 1616 reads per sample 
+
+head(phyloseq::sample_sums(new_AMF_rarefied))
+sample_sums(new_AMF_rarefied)
+
+```
+
+
+#### package version
+## R-version; 3.6.1
+## dada2; 1.12.1
+## vegan; 2.5-5
+## devtools; 2.2.0
+## DECIPHER; 2.12.0
+## phyloseq; 1.29.0
+## ggplot2; 3.2.1
+## microbiome; 1.7.2
+## data.table; 1.12.2
+## ape; 5.3
+## S4Vectors; 0.23.24
+
+
