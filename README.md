@@ -1,2 +1,2 @@
 # Arbuscular mycorrhizal fungal communities in DOK experiment
-A pipeline for processing CCS reads of AMF to ASVs with DADA2
+A pipeline for processing CCS reads of AMF to ASVs using DADA2
