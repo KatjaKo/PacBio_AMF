@@ -54,7 +54,6 @@ plotQualityProfile(fns[43:48])
 
 ```
 
-
 # length distribution 
 
 ```{r}
@@ -76,7 +75,8 @@ filt_path <- file.path(path_fastq, "filtered")
 filt_fns <- file.path(path_fastq, "filtered", paste0(sample.names, "_filt.fq.gz"))
 names(filt_fns) <- sample.names
 
-filt_out <- filterAndTrim(fns, filt_fns, minQ=2, minLen=1350, maxLen=1700, maxN=0, rm.phix=FALSE, maxEE=3, multithread = FALSE) #we retain only reads with fewer than three exp. errors 
+#filter from 1400 to 1650
+filt_out <- filterAndTrim(fns, filt_fns, minQ=2, minLen=1450, maxLen=1650, maxN=0, rm.phix=FALSE, maxEE=3, multithread = FALSE) #we retain only reads with fewer than three exp. errors 
 print(filt_out)
 
 #csv file containing number of input and output/filtered sequences
@@ -94,6 +94,8 @@ length_fns_filt <- lapply(filt_path, function(fn) nchar(getSequences(fn)))
 length_filt <- do.call(c, length_fns_filt)
 hist(length_filt, 100)
 mean(length_filt); median(length_filt)
+#1529.076
+#1529
 
 ```
 
@@ -101,6 +103,7 @@ mean(length_filt); median(length_filt)
 
 ```{r}
 #dereplication combines all identical sequencing reads into into “unique sequences” with a corresponding “abundance”: the number of reads with that unique sequence
+#collapsing together all reads that encode the same sequence
 
 #collapse identical sequences
 derep <- derepFastq(filt_fns, verbose=TRUE)
@@ -113,9 +116,8 @@ names(derep) <- sample.names #name the derep-class objects by the sample names
 ```{r}
 #error rates for each possible transition 
 set.seed(100)
-err <- learnErrors(derep, errorEstimationFunction = PacBioErrfun, BAND_SIZE = 32, 
-                   multithread = TRUE, verbose = TRUE)  
-#106420556 total bases in 69365 reads from 12 samples will be used for learning the error rates.
+err <- learnErrors(derep, errorEstimationFunction = PacBioErrfun, BAND_SIZE = 32, verbose = TRUE)  
+#103155500 total bases in 67095 reads from 12 samples will be used for learning the error rates.
 
 plotErrors(err)
 plotErrors(err, nominalQ=TRUE) #red line shows the error rates, the estimated error rates (black line) are a good fit to the observed rates (points), error rates should drop with the increased quality 
@@ -127,7 +129,7 @@ plotErrors(err, nominalQ=TRUE) #red line shows the error rates, the estimated er
 ```{r}
 #infer the sequence variants in each sample
 #separate true biological sequences from errors
-dada_dd <- dada(derep, err = err, BAND_SIZE = 32, multithread = TRUE, verbose = TRUE, pool = "pseudo") #number of true sequences
+dada_dd <- dada(derep, err = err, BAND_SIZE = 32, multithread=TRUE, verbose = TRUE, pool = "pseudo") #number of true sequences
 dada_dd[[1]] #check only the first sample
 
 ```
@@ -135,9 +137,22 @@ dada_dd[[1]] #check only the first sample
 # construct sequence (ASV) table
 
 ```{r}
-seqtab <- makeSequenceTable(dada_dd); dim(seqtab) #48 998
+
+seqtab <- makeSequenceTable(dada_dd); dim(seqtab) #48 972
 table(nchar(getSequences(seqtab))) #distibution of sequence lengths 
-#shortest 1398, longest 1634
+#shortest 1468, longest 1634
+
+saveRDS(seqtab, "all_seq.rds")
+
+#extract original sequences, belonging to 972 ASVs
+
+asv_seqs_original <- colnames(seqtab)
+asv_headers_original <- vector(dim(seqtab)[2], mode = "character")
+for (i in 1:dim(seqtab)[2]) {
+  asv_headers_original[i] <- paste(">ASV", i, sep = "_")
+}
+asv_fasta_original <- c(rbind(asv_headers_original, asv_seqs_original))
+write(asv_fasta_original, "ASVs_original.fasta")
 
 ```
 
@@ -145,13 +160,15 @@ table(nchar(getSequences(seqtab))) #distibution of sequence lengths
 
 ```{r}
 seqtab.nochim <- removeBimeraDenovo(seqtab, method="consensus", multithread=TRUE, verbose=TRUE)
-dim(seqtab.nochim) #48 988
+dim(seqtab.nochim) 
+#48 962
 #chimeras removed 
 #seqtab.nochim file is the final file, samples and sequences that represents ASVs
 
 #what proportion of the sequence variants are chimeras
-sum(seqtab.nochim)/sum(seqtab)
-1-sum(seqtab.nochim)/sum(seqtab)  #0.004064076
+sum(seqtab.nochim)/sum(seqtab) 
+#0.9958734
+1-sum(seqtab.nochim)/sum(seqtab)  #0.004126584
 
 ```
 
@@ -204,57 +221,159 @@ write.table(asv_tab, "/Users/Katja/Box Sync/PhD Lund Katja/Sequencing/PacBio AMF
 
 ```
 
-# assign taxonomy using UNITE2020 reference database
+# Create OTU from ASV table
+# https://github.com/benjjneb/dada2/issues/947
 
 ```{r}
 
-#upload DECIPHER reference database (UNITE_v2020_February2020.RData), when it is uploaded it is named as trainingSet
+#use seqtab file 48 972
 
-load("/Users/Katja/Box Sync/PhD Lund Katja/Sequencing/PacBio AMF/Sequencing data AMF/dada2/AMF_DOK trial/reference databases/UNITE_v2020_February2020.RData")
+library(tibble)
+library(dplyr)
+library(DECIPHER)
+library(Biostrings)
+
+nproc <- 4 # set to number of cpus/processors to use for the clustering
+
+asv_sequences <- colnames(seqtab)
+sample_names <- rownames(seqtab)
+dna <- Biostrings::DNAStringSet(asv_sequences)
+
+## Find clusters of ASVs to form the new OTUs
+aln <- DECIPHER::AlignSeqs(dna, processors = nproc)
+d <- DECIPHER::DistanceMatrix(aln, processors = nproc)
+clusters <- DECIPHER::IdClusters(
+  d, 
+  method = "complete",
+  cutoff = 0.03, # use `cutoff = 0.03` for a 97% OTU 
+  processors = nproc)
+
+## Use dplyr to merge the columns of the seqtab matrix for ASVs in the same OTU
+# prep by adding sequences to the `clusters` data frame
+clusters <- clusters %>%
+  add_column(sequence = asv_sequences)
+merged_seqtab <- seqtab %>%
+  # setup: turn seqtab into a tibble with rows = ASVs and columns = samples
+  t %>%
+  as_tibble(rownames = "sequence") %>%
+  # add the cluster information
+  left_join(clusters, by = "sequence") %>%
+  # merge ASVs in the same cluster, summing abundances within samples
+  group_by(cluster) %>%
+  summarize_at(vars(-sequence), sum) %>%
+  # Set new taxa names to OTU<cluster #> 
+  mutate(cluster = paste0("OTU", cluster)) %>%
+  # convert back to a matrix in the original orientation
+  column_to_rownames("cluster") %>%
+  as("matrix") %>%
+  t
+
+dim(merged_seqtab) # 48 117
+
+newdf<-as.data.frame(cbind.data.frame(rownames(clusters),clusters$cluster,clusters$sequence))
+colnames(newdf)<-c("ASV","C.ASV","sequence") 
+newdf.sort<-newdf %>% arrange(C.ASV) %>% distinct(C.ASV,.keep_all = TRUE)
+fas<-paste(">OTU",seq(1:nrow(newdf.sort)),"\n",newdf.sort$sequence,sep="")
+write.table(fas,file="out.fas", row.names=FALSE, col.names=FALSE,quote = FALSE)
+
+```
+
+#following the workflow from Dominika (see html)
+
+```{r}
+
+#upload fasta file with all ASVs, 972
+reference_seqs <- readDNAStringSet(file = "/Users/Katja/Box Sync/PhD Lund Katja/Sequencing/PacBio AMF/Sequencing data AMF/dada2/AMF_DOK trial/PacBio_AMF_workflow/results_dada2/ASVs_original.fasta", format = "fasta", nrec = -1L, skip = 0L, seek.first.rec = FALSE, use.names = TRUE)
+ps <- reference_seqs
+
+dna_ps <- refseq(ps)
+aln <- DECIPHER::AlignSeqs(dna_ps, processors = nproc)
+d <- DECIPHER::DistanceMatrix(aln, processors = nproc)
+
+clusters <- DECIPHER::IdClusters(
+  d, 
+  method = "complete", #two options complete or single
+  cutoff = 0.02, # corresponds to 98% OTUs # this threshold can be adjusted
+  processors = nproc
+)
+
+#merge phyloseq
+ps0 <- speedyseq::merge_taxa_vec(
+  ps, 
+  group = clusters$cluster,
+  tax_adjust = 1
+)
+
+#merge newly generated phyloseq with existing phyloseq, taxonomy from 
+
+ps.merged <- merge_phyloseq(physeq, ps0)
+ps.merged #82 OTU with single and with complete 112
+
+rank_names(ps.merged)
+head(tax_table(ps.merged))
+unique(tax_table(ps.merged)[,1])
+
+#Proportion not assigned on the Phylum level
+round((100*sum(is.na((tax_table(ps.merged)[,2]))))/nrow(((tax_table(ps.merged)[,2]))),0)
+
+#remove all NA on phylum level 
+physeq_filtered <- subset_taxa(ps.merged, Phylum != "NA")
+unique(tax_table(physeq_filtered)[,2])
+
+barplot(sort(sample_sums(physeq_filtered), decreasing = F))
+(sort(sample_sums(physeq_filtered), decreasing = F)) #many samples do not contain any sequences 
+#this needs to be solved
+
+```
+
+#install speedyseq 
+
+```{r}
+
+#install speedyseq package
+#https://github.com/mikemc/speedyseq
+library(remotes)
+remotes::install_github("mikemc/speedyseq")
+
+```
+
+# Assign taxonomy using Kruger reference dataset 2012
+## using naive Bayesian classifier method 
+
+```{r}
 
 set.seed(NULL) #return to the original state by unsetting the seed
 set.seed(62)
 
-taxonomy_unite <- DNAStringSet(getSequences(seqtab.nochim)) # create a DNAStringSet from the ASVs
-taxonomy_unite <- RemoveGaps(taxonomy_unite)
+#take Kruger 2012 database
 
-#assign classification
-ids <- IdTaxa(taxonomy_unite, trainingSet, strand="both", threshold=50, bootstraps=100, processors=NULL, verbose=FALSE)
-View(ids) #results 
+taxonomy_kruger <- assignTaxonomy(seqtab.nochim, "/Users/Katja/Box Sync/PhD Lund Katja/Sequencing/PacBio AMF/Sequencing data AMF/dada2/AMF_DOK trial/reference databases/Formated_UNITE_UPPER.fasta", multithread=TRUE, tryRC = TRUE)
 
-plot(ids) #pie chart showing the relative abundance of the taxonomic groups assigned to test sequences
-plot(ids, trainingSet) #including the taxonomic training set 
+tax_kruger <- taxonomy_kruger # Removing sequence rownames for display only
+rownames(tax_kruger) <- NULL
+rownames(tax_kruger) <- getSequences(asv_tab)
+head(tax_kruger)
 
-ranks <- c("kingdom", "phylum", "class", "order", "family", "genus", "species") # ranks of interest
-View(ranks) 
-
-taxid <- t(sapply(ids, function(x) {
-  m <- match(ranks, x$rank)
-  taxa <- x$taxon[m]
-  taxa[startsWith(taxa, "unclassified_")] <- NA
-  taxa
-}))
-
-colnames(taxid) <- ranks; rownames(taxid) <- getSequences(asv_tab)
-write.csv(taxid, "/Users/Katja/Box Sync/PhD Lund Katja/Sequencing/PacBio AMF/Sequencing data AMF/dada2/AMF_DOK trial/PacBio_AMF_workflow/results_dada2/taxonomy_unite2020.csv")
+write.csv(tax_kruger, "/Users/Katja/Box Sync/PhD Lund Katja/Sequencing/PacBio AMF/Sequencing data AMF/dada2/AMF_DOK trial/PacBio_AMF_workflow/results_dada2/tax_kruger.csv")
+write.csv(taxonomy_kruger, "/Users/Katja/Box Sync/PhD Lund Katja/Sequencing/PacBio AMF/Sequencing data AMF/dada2/AMF_DOK trial/PacBio_AMF_workflow/results_dada2/tax_kruger_seq.csv")
 
 ```
 
-# create phyloseq object 
+# Create phyloseq object with Kruger set, 962 ASV
 
 ```{r}
 
 OTU = otu_table(asv_tab, taxa_are_rows = FALSE)
-#988 taxa, 48 samples
-TAX = tax_table(taxid)
+#962 taxa, 48 samples
+TAX = tax_table(tax_kruger)
 
-meta_file = read.csv("/Users/Katja/Box Sync/PhD Lund Katja/Sequencing/PacBio AMF/Sequencing data AMF/dada2/Meta files AMF/meta_DOK.csv", sep=",", row.names=1)
+meta_file = read.csv("/Users/Katja/Box Sync/PhD Lund Katja/Sequencing/PacBio AMF/Sequencing data AMF/dada2/Meta files AMF/meta_DOK.csv", sep=",", row.names=1) 
 meta_file = sample_data(data.frame(meta_file))
 
 physeq = phyloseq(OTU, TAX, meta_file)
 physeq
-#OTU_table; 988 taxa, 48 samples
-#tax_table; 988 taxa, by 7 taxonomic ranks
+#OTU_table; 962 taxa, 48 samples
+#tax_table; 962 taxa, by 7 taxonomic ranks
 #meta_file; 48 samples, 24 variables 
 
 sample_sums(physeq) #the total read count from initial file physeq_AMF
@@ -268,29 +387,27 @@ plot((random_tree))
 physeq = merge_phyloseq(physeq, random_tree)
 physeq
 
-ntaxa(physeq) #988 
+ntaxa(physeq) #962
 nsamples(physeq) #48
 sample_names(physeq) #S25,S26...
 sample_variables(physeq) #such as sample_ID, time_point, treatment
-rank_names(physeq) #kingdom, phylum, class
+rank_names(physeq) #Kingdom, Phylum, Class
 taxa_sums(physeq) #the total number of individuals observed from each species/taxa/OTU
 
 ```
 
-# filtering
+## filtering
 
 ```{r}
 
-table(tax_table(physeq)[, "kingdom"], exclude=NULL)
-#now we remove 40 NA on kingdom level, they do not belong to Fungi
+table(tax_table(physeq)[, "Kingdom"], exclude=NULL)
+#now we remove 548 NA on Kingdom level
 
-physeq0 <- subset_taxa(physeq, !is.na(kingdom) & !kingdom %in% c ("", "uncharacterized"))
+physeq0 <- subset_taxa(physeq, !is.na(Kingdom) & !Kingdom %in% c ("", "uncharacterized"))
+#414 ASVs left
 
-table(tax_table(physeq0)[, "phylum"], exclude=NULL)
-#3 ASVs belong to Ascomycota, we remove these
-
-physeq0 <- subset_taxa(physeq0, !is.na(phylum) & !phylum %in% c ("Ascomycota"))
-#we keep Glomeromycota, 945 ASVs
+table(tax_table(physeq0)[, "Phylum"], exclude=NULL)
+#they all belong to Glomeromycota as expected
 
 #extract taxonomy table 
 write.csv(physeq0@tax_table, "/Users/Katja/Box Sync/PhD Lund Katja/Sequencing/PacBio AMF/Sequencing data AMF/dada2/AMF_DOK trial/PacBio_AMF_workflow/results_dada2/taxonomy_glomeromycota.csv")
@@ -300,26 +417,11 @@ write.csv(physeq0@otu_table, "/Users/Katja/Box Sync/PhD Lund Katja/Sequencing/Pa
 
 ```
 
-# create new phyloseq object with renamed taxonomy
+## final phyloseq object with only Glomeromycota
 
 ```{r}
 
-#create new physeq object with renamed taxonomy
-
-taxa_file = read.csv("/Users/Katja/Box Sync/PhD Lund Katja/Sequencing/PacBio AMF/Sequencing data AMF/dada2/AMF_DOK trial/PacBio_AMF_workflow/results_dada2/taxonomy_glomeromycota_filt.csv", sep=",", row.names=1)
-taxa_file = tax_table(as.matrix(taxa_file))
-
-asv_file = read.csv("/Users/Katja/Box Sync/PhD Lund Katja/Sequencing/PacBio AMF/Sequencing data AMF/dada2/AMF_DOK trial/PacBio_AMF_workflow/results_dada2/ASVs_counts_filt.csv", sep=",", row.names=1)
-asv_file = otu_table(as.matrix(asv_file), taxa_are_rows = FALSE)
-
-physeq_AMF = phyloseq(asv_file, taxa_file, meta_file)
-
-random_tree_amf = rtree(ntaxa(physeq_AMF), rooted=TRUE, tip.label=taxa_names(physeq_AMF))
-plot((random_tree_amf))
-
-#add random tree to phyloseq object 
-physeq_AMF = merge_phyloseq(physeq_AMF, random_tree_amf)
-physeq_AMF
+physeq_AMF <- physeq0
 
 #compute prevalence of each feature, store as data.frame
 prevdf=apply(X=otu_table(physeq_AMF), 
@@ -331,18 +433,23 @@ prevdf=data.frame(Prevalence=prevdf,
                   TotalAbundance=taxa_sums(physeq_AMF), tax_table(physeq_AMF))
 
 #how many total sequences
-sum(sample_sums(physeq_AMF)) #185752
+sum(sample_sums(physeq_AMF)) #107183
 sort(sample_sums(physeq_AMF), decreasing = F) 
-min(sample_sums(physeq_AMF)) #376
-max(sample_sums(physeq_AMF)) #11426
-median(sample_sums(physeq_AMF)) #3387
-mean(sample_sums(physeq_AMF)) #3869.833
+min(sample_sums(physeq_AMF)) #0
+max(sample_sums(physeq_AMF)) #6934
+median(sample_sums(physeq_AMF)) #1834
+mean(sample_sums(physeq_AMF)) #2232.979
 
 #how many taxa are there? 
-unique(ntaxa(physeq_AMF)) #945
+unique(ntaxa(physeq_AMF)) #414
+
+#save phyloseq object
+saveRDS(physeq_AMF, "/Users/Katja/Box Sync/PhD Lund Katja/Sequencing/PacBio AMF/Sequencing data AMF/dada2/AMF_DOK trial/PacBio_AMF_workflow/results_dada2/phyloseq_AMF.rds")
 
 ```
-**945 ASVs in Glomeromycota phylum**
+**414 ASVs in Glomeromycota phylum**
+
+## rarefaction curves
 
 ```{r}
 
@@ -350,8 +457,13 @@ rarecurve(otu_table(physeq_AMF), xlab="Number of sequences",  ylab="Number of AS
 
 barplot(sort(sample_sums(physeq_AMF)),
         ylab= "Number of reads", xlab="Sample ID")
-#samples 85, 31, 45, 84 contain less than 1000 reads 
+sort(sample_sums(physeq_AMF), decreasing = F)
 
+```
+
+## filtering of phyloseq object
+
+```{r}
 #remove samples with the lowest nr. of sequences
 #"T1.RC.42", "T1.C.86", "T3.C.48", "T3.RC.52"
 
@@ -360,6 +472,7 @@ physeq_AMF_44s <- subset_samples(physeq_AMF_44s, sample_ID !="T1.C.86")
 physeq_AMF_44s <- subset_samples(physeq_AMF_44s, sample_ID !="T3.C.48")
 physeq_AMF_44s <- subset_samples(physeq_AMF_44s, sample_ID !="T3.RC.52")
 
+#if any ASVs are not present in any samples
 any(taxa_sums(physeq_AMF_44s) == 0) 
 
 #remove singeltons
@@ -375,12 +488,12 @@ unique(ntaxa(physeq_AMF_44s)) #933
 ```
 **We set a limit to at least 1000 AMF sequences per sample, therefore 4 samples were removed. For all further analyses dataset with 44 sampples will be used.**
 
-# rarefaction analysis
+## rarefaction analysis
 
 ```{r}
 
 #### rarefaction 
-#rarefy the reads, set seed 6020, Innsbruck postal code
+#rarefy the reads, set seed 6020
 set.seed(NULL)
 set.seed(6020)
 
@@ -398,7 +511,7 @@ unique(ntaxa(physeq_AMF_rar)) #932
 ```
 **The ASV table is normalized by rarefaction to 1102 reads per sample. This will be used for alpha diversity estimates.**
 
-# comparison before and after rarefaction
+## comparison before and after rarefaction
 
 ```{r rarefaction, echo=F}
 # before rarefaction
@@ -893,38 +1006,80 @@ mean(diff_brms_faith)
 ```{r}
 #all community-related analyses are based on relative abundances of ASVs per sample
 #we use non-rarefied dataset
+#here I don't do any filtering, i.e. low/high abundance
 
 #TSS normalization
-rel_ab_AMF <- transform_sample_counts(physeq_AMF_44s, function(OTU) OTU/sum(OTU))
+rel_ab_AMF <- transform_sample_counts(physeq_AMF_44s, function(x) x / sum(x))
+rel_ab_matrix <- as.matrix(rel_ab_AMF@otu_table)
+
+#percentages
 percent_AMF <- transform_sample_counts(physeq_AMF_rar, function(x) 100 * x/sum(x))
 
 ```
 
 ## overall PERMANOVA
+## TSS data used (44 s., relative abundances)
 
 ```{r}
-#calculate Bray-Curtis distance
-bray_dist <- phyloseq::distance(rel_ab_AMF, method = "bray")
 
 ##### overall PERMANOVA #####
 ## Perform PERMANOVA testing for main effects (system, treatment, time) and interactions between time&system&treatment with block in strata
+
+#calculate Bray-Curtis distance
+bray_dist <- phyloseq::distance(rel_ab_AMF, method = "bray")
 
 meta.df <- as(sample_data(rel_ab_AMF), "data.frame")
 
 set.seed(1546)
 overall_permanova <- adonis2(bray_dist ~ treatment+time+farming_system+
                                          farming_system:treatment+
-                                         treatment:time,
+                                         treatment:time+
                                          time:farming_system,
                                          strata=meta.df$block,
                                          data = meta.df,permutations = 999)
 overall_permanova
+#only significant effect of the time of sampling p=0.024
+#farming sys. 0.361, treatment 0.144
 
 #save output for paper
 overall_permanova_results <- as.data.frame(overall_permanova)
 overall_permanova_results <- overall_permanova_results[, c("Df","SumOfSqs", "R2", "F", "Pr(>F)")]
 write.table(overall_permanova_results, "overall_permanova.txt", sep="\t",quote=F)
+
 ```
+
+## multivariate spread
+
+```{r}
+#system
+betadisper_system <- betadisper(bray_dist, meta.df$farming_system, type="centroid")
+set.seed(1817)
+dispersion_sys <- permutest(betadisper_system, pairwise=T, permutations=how(nperm=999)) 
+dispersion_sys
+
+boxplot(betadisper_system, xlab = "Farming system")
+plot(betadisper_system,  col =c("darkgreen", "darkgoldenrod1"), cex=2)
+
+#treatment
+betadisper_treat <- betadisper(bray_dist, meta.df$treatment, type="centroid")
+set.seed(1817)
+dispersion_treat <- permutest(betadisper_treat, pairwise=T, permutations=how(nperm=999)) 
+dispersion_treat
+
+boxplot(betadisper_treat, xlab = "Drought treatment")
+
+#time 
+betadisper_time <- betadisper(bray_dist, meta.df$time, type="centroid")
+set.seed(1817)
+dispersion_time <- permutest(betadisper_time, pairwise=T, permutations=how(nperm=999)) 
+dispersion_time
+
+boxplot(betadisper_time, xlab = "Time")
+plot(betadisper_time,  col =c("darkgreen", "darkgoldenrod1"), cex=2)
+
+```
+
+#Convert from phyloseq to vegan or from vegan to phyloseq
 
 ```{r}
 
@@ -945,7 +1100,7 @@ psotu2veg <- function(physeq) {
 
 ```
 
-## NMDS ordination
+# NMDS ordination
 
 ```{r}
 
@@ -954,16 +1109,20 @@ nmds_all <- psotu2veg(rel_ab_AMF)
 
 #calculate the distance matrix
 set.seed(0902)
-nmds_ord <- metaMDS(nmds_all, distance = "bray", k=2,trymax=1000, autotransform=T) 
+nmds_ord <- metaMDS(nmds_all, distance = "bray", k=2, trymax=1000, autotransform=T)
 nmds_ord$stress
 
 #stress is goodness of fit 
+goodness(nmds_ord)
 stressplot(nmds_ord)
  
 #this function draws NMDS ordination diagram with sites (=my samples)
 plot(nmds_ord, display = 'sites', type = 't', main = 'Goodness of fit')
 
 ```
+**No convergence!!!**
+
+#envfit 
 
 ```{r, echo=F}
 
@@ -986,7 +1145,7 @@ head(data.scores_nmds)
 
 #calculate envfit
 set.seed(0935)
-env.fit <- envfit(scores(nmds_ord), env_nmds, permutations = 999, na.rm = TRUE)
+env.fit <- envfit(scores(nmds_ord), env_nmds, permutations = 999, na.rm = TRUE, strata=nmds_meta$block)
 env.fit
 
 #extract scores from environment
@@ -1008,6 +1167,7 @@ en_coord_cat = as.data.frame(scores(env.fit, "factors")) * ordiArrowMul(env.fit)
 
 ```
 
+## final NMDS plot 
 
 ```{r}
 #plot with significant environmental parameters
@@ -1017,6 +1177,94 @@ nmds_final <- ggplot() + geom_point(data = data.scores_nmds, aes(x = NMDS1, y = 
 print(nmds_final)
 ggsave("nmds_final.pdf", width = 40, height = 20, units = "cm")
 ggsave("nmds_final.tiff", width = 35, height = 20, units = "cm")
+
+```
+
+#I will try some other options, like PCoA, transformations...
+
+```{r}
+
+#PERMANOVA for all samples, 48, relative abundances
+
+rel_ab_48 <- transform_sample_counts(physeq_AMF, function(OTU) OTU/sum(OTU))
+bray_48 <- phyloseq::distance(rel_ab_48, method = "bray")
+
+meta.48 <- as(sample_data(rel_ab_48), "data.frame")
+
+set.seed(1546)
+adonis2(bray_48 ~ treatment+time+farming_system+
+                     farming_system:treatment+
+                     treatment:time,
+                     time:farming_system,
+                     strata=meta.48$block,
+                     data = meta.48,permutations = 999)
+#only time, 0.031
+
+#PERMANOVA for 44 samples, rarefied dataset, relative abundances
+
+rel_ab_rar <- transform_sample_counts(physeq_AMF_rar, function(OTU) OTU/sum(OTU))
+bray_rar <- phyloseq::distance(rel_ab_rar, method = "bray")
+
+meta.rar <- as(sample_data(rel_ab_rar), "data.frame")
+
+set.seed(1546)
+adonis2(bray_rar ~ treatment+time+farming_system+
+                     farming_system:treatment+
+                     treatment:time,
+                     time:farming_system,
+                     strata=meta.rar$block,
+                     data = meta.rar,permutations = 999)
+#only time, 0.021
+
+```
+
+#filter and remove ASVs present in less than 2 samples
+
+```{r}
+#filter to just taxa that appeared in more than one sample (prevalence >= 2)
+
+filter <- filter_taxa(physeq_AMF_44s, function(x){sum(x > 0) > 1}, prune = TRUE) #79 ASVs left
+filter_relab <- transform_sample_counts((filter), function(OTU) OTU/sum(OTU))
+bray_relab <- phyloseq::distance(filter_relab, method = "bray")
+
+set.seed(1546)
+adonis2(bray_relab ~ treatment+time+farming_system+
+                     farming_system:treatment+
+                     treatment:time,
+                     time:farming_system,
+                     strata=meta.df$block,
+                     data = meta.df,permutations = 999)
+#time, 0.029
+#system, 0.037
+
+#calculate nmds for filtered dataset
+
+nmds_filter <- psotu2veg(filter_relab)
+set.seed(1547)
+nmds_ord_filter <- metaMDS(nmds_filter, distance = "bray", k=2, trymax=1000, autotransform=T) #still no convergence
+nmds_ord_filter$stress
+
+```
+
+# pcoa testing
+
+```{r}
+
+#log transformation, 44 samples
+logt  = transform_sample_counts(physeq_AMF_44s, function(x) log(1 + x) )
+out.pcoa.logt <- ordinate(logt, method = "PCoA", distance = "bray")
+evals <- out.pcoa.logt$values$Eigenvalues
+plot_ordination(logt, out.pcoa.logt, type = "samples", 
+                color = "farming_system") + labs(col = "farming system") +
+  coord_fixed(sqrt(evals[2] / evals[1]))
+
+#hellinger transformation, for filtered data
+hell  = transform_sample_counts(filter, function(x) sqrt(x / sum(x)))
+out.pcoa.hell <- ordinate(hell, method = "PCoA", distance = "bray")
+evals_hell <- out.pcoa.hell$values$Eigenvalues
+plot_ordination(hell, out.pcoa.hell, type = "samples", 
+                color = "farming_system") + labs(col = "farming system") +
+  coord_fixed(sqrt(evals[2] / evals[1]))
 
 ```
 
@@ -1151,7 +1399,7 @@ adonis_AMF_class <- adonis2(AMF_class_dist ~ treatment+time+farming_system+
                                              data=meta.df,permutations = 999)
 adonis_AMF_class
 #only time effect
-#time: 0.017
+#time: 0.020
 
 adonis_AMF_class.df <- as.data.frame(adonis_AMF_class)
 adonis_AMF_class.df<-adonis_AMF_class.df[, c("Df","SumOfSqs", "R2", "F", "Pr(>F)")]
@@ -1225,6 +1473,7 @@ adonis_glomeromycetes <-adonis2(AMF_glomeromycetes_dist ~
                                 data=meta.df,permutations = 999)
 adonis_glomeromycetes
 #time 0.037
+#only time effect
 
 adonis_glomeromycetes.df <- as.data.frame(adonis_glomeromycetes)
 adonis_glomeromycetes.df<-adonis_glomeromycetes.df[, c("Df","SumOfSqs", "R2", "F", "Pr(>F)")]
@@ -1256,6 +1505,7 @@ adonis_AMF_family <-adonis2(AMF_family_dist ~ treatment+time+farming_system+
                                             time:farming_system,                                                                                                                   strata=meta.df$block,
                                             data=meta.df,permutations = 999)
 adonis_AMF_family
+#only time effect
 #time: 0.022
 
 adonis_AMF_family.df <- as.data.frame(adonis_AMF_family)
@@ -1310,6 +1560,7 @@ adonis_AMF_genus <-adonis2(AMF_genus_dist ~ treatment+time+farming_system+
                                             time:farming_system,                                                                                                                   strata=meta.df$block,
                                             data=meta.df,permutations = 999)
 adonis_AMF_genus
+#only time effect
 #time: 0.043
 
 adonis_AMF_genus.df <- as.data.frame(adonis_AMF_genus)
