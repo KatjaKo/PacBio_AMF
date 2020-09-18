@@ -8,7 +8,9 @@ output:
 ---
 
 ```{r setup, include=FALSE}
+
 knitr::opts_chunk$set(warning = FALSE, message = FALSE)
+
 ```
 
 # Prepare the environment
@@ -19,18 +21,28 @@ knitr::opts_chunk$set(warning = FALSE, message = FALSE)
 #rm(list=ls())
 
 #load libraries
-library(dada2); packageVersion("dada2") #1.14.0
-library(phyloseq); packageVersion("phyloseq") #1.30.0
-library(vegan); packageVersion("vegan") #2.5.6
-library(ggplot2); packageVersion("ggplot2") #3.2.1
+library(dada2); packageVersion("dada2") 
+library(phyloseq); packageVersion("phyloseq") 
+library(vegan); packageVersion("vegan") 
+library(ggplot2); packageVersion("ggplot2")
 library(dplyr); packageVersion("dplyr")
+library(tidyverse); packageVersion("tidyverse")
+library(ggpubr); packageVersion("ggpubr")
+library(devtools); packageVersion("devtools")
+library(ape); packageVersion("ape")
+library(brms); packageVersion("brms") 
+library(shinystan); packageVersion("shinystan") 
+library(picante); packageVersion("picante")
+library(indicspecies); packageVersion("indicspecies")
+library(ggvegan); packageVersion("ggvegan")
+library(devtools); packageVersion("devtools")
 
 ```
 
 # Start with DADA2 pipeline, create ASVs from fastq files
 ## set path
 
-```{r set path, echo=F}
+```{r set path}
 
 path_fastq <- "/Users/Katja/Box Sync/PhD Lund Katja/Sequencing/PacBio AMF/Sequencing data AMF/dada2/AMF_DOK trial/samples"
 list.files(path_fastq) #listing all files in the path
@@ -57,7 +69,7 @@ plotQualityProfile(fns[43:48])
 
 ## length distribution of the original sequences 
 
-```{r original length distribution, echo=F}
+```{r original length distribution}
 
 #inspect length distribution of sequences to determine how to filter the sequences
 length_fns <- lapply(path_fastq, function(fn) nchar(getSequences(fn)))
@@ -69,7 +81,7 @@ mean(length); median(length)
 
 ## filter and trim original sequences 
 
-```{r filter + trim, echo=F}
+```{r filter + trim}
 
 #place filtered files in filtered/ subdirectory 
 filt_path <- file.path(path_fastq, "filtered") 
@@ -85,11 +97,9 @@ write.csv(filt_out, "/Users/Katja/Box Sync/PhD Lund Katja/Sequencing/PacBio AMF/
 
 ```
 
-## length distribution of filtered sequences
+## inspect length distribution of filtered sequences
 
-```{r length distribution, echo=F}
-
-# Inspect length distribution of filtered sequences
+```{r length distribution filtered sequences}
 
 length_fns_filt <- lapply(filt_path, function(fn) nchar(getSequences(fn)))
 length_filt <- do.call(c, length_fns_filt)
@@ -101,11 +111,10 @@ mean(length_filt); median(length_filt)
 ```
 
 ## dereplication of identical reads
+ + dereplication combines all identical sequencing reads into into “unique sequences” with a corresponding “abundance”: the number of reads with that unique sequence
++ collapsing together all reads that encode the same sequence
 
-```{r dereplication, echo=F}
-
-#dereplication combines all identical sequencing reads into into “unique sequences” with a corresponding “abundance”: the number of reads with that unique sequence
-#collapsing together all reads that encode the same sequence
+```{r dereplication}
 
 #collapse identical sequences
 derep <- derepFastq(filt_fns, verbose=TRUE)
@@ -114,10 +123,10 @@ names(derep) <- sample.names #name the derep-class objects by the sample names
 ```
 
 ## error rates
++ error rates for each possible transition
 
-```{r error rates, echo=F}
+```{r error rates}
 
-#error rates for each possible transition 
 set.seed(100)
 err <- learnErrors(derep, errorEstimationFunction = PacBioErrfun, BAND_SIZE = 32, verbose = TRUE)  
 #103155500 total bases in 67095 reads from 12 samples will be used for learning the error rates.
@@ -128,11 +137,11 @@ plotErrors(err, nominalQ=TRUE) #red line shows the error rates, the estimated er
 ```
 
 ## denoise 
++ infer the sequence variants in each sample
++ separate true biological sequences from errors
 
-```{r denoise, echo=F}
+```{r denoise}
 
-#infer the sequence variants in each sample
-#separate true biological sequences from errors
 dada_dd <- dada(derep, err = err, BAND_SIZE = 32, multithread=TRUE, verbose = TRUE, pool = "pseudo") #number of true sequences
 dada_dd[[1]] #check only the first sample
 
@@ -140,7 +149,7 @@ dada_dd[[1]] #check only the first sample
 
 # Construct sequence variant (ASV) table, a higher-resolution version of the OTU table produced by traditional methods
 
-```{r ASV table, echo=F}
+```{r ASV table}
 
 seqtab <- makeSequenceTable(dada_dd); dim(seqtab) #48 972
 table(nchar(getSequences(seqtab))) #distibution of sequence lengths 
@@ -162,7 +171,7 @@ write(asv_fasta_original, "ASVs_original.fasta")
 
 ## remove chimeras 
 
-```{r remove chimeras, echo=F}
+```{r remove chimeras}
 
 seqtab.nochim <- removeBimeraDenovo(seqtab, method="consensus", multithread=TRUE, verbose=TRUE)
 dim(seqtab.nochim) 
@@ -179,7 +188,7 @@ sum(seqtab.nochim)/sum(seqtab)
 
 ## summary, track retained sequences
 
-```{r summarize, echo=F}
+```{r summarize}
 
 getN <- function(x) sum(getUniques(x))
 track <- cbind(filt_out, sapply(dada_dd, getN), rowSums(seqtab.nochim))
@@ -201,7 +210,7 @@ rarecurve(seqtab.nochim)
 
 # Export fasta file 
 
-```{r fasta files, echo=F}
+```{r fasta files}
 
 #give our sequence headers more manageable names (ASV_1, ASV_2...) and write out a FASTA of our ASV seqs
 asv_seqs <- colnames(seqtab.nochim)
@@ -219,7 +228,7 @@ write(asv_fasta, "/Users/Katja/Box Sync/PhD Lund Katja/Sequencing/PacBio AMF/Seq
 
 # Export count table
 
-```{r count table, echo=F}
+```{r count table}
 
 asv_tab <- (seqtab.nochim)
 colnames(asv_tab) <- sub(">", "", asv_headers)
@@ -232,7 +241,7 @@ write.table(asv_tab, "/Users/Katja/Box Sync/PhD Lund Katja/Sequencing/PacBio AMF
 
 # Taxonomy with UNITE 2020
 
-```{r}
+```{r taxonomy unite 2020}
 
 set.seed(NULL) #return to the original state by unsetting the seed
 set.seed(62)
@@ -254,7 +263,7 @@ write.csv(taxonomy_unite, "/Users/Katja/Box Sync/PhD Lund Katja/Sequencing/PacBi
 
 # Create phyloseq object with 962 ASV, based on UNITE taxonomy
 
-```{r create phyloseq, echo=F}
+```{r create phyloseq}
 
 #OTU table
 OTU = otu_table(asv_tab, taxa_are_rows = FALSE)
@@ -280,6 +289,7 @@ physeq_unite
 #tax_table; 962 taxa, by 7 taxonomic ranks
 #meta_file; 48 samples, 24 variables 
 
+#phyloseq with relative abundance
 physeq_unite_rel = phyloseq(OTUr, tax_unite, meta_file)
 
 sort(sample_sums(physeq_unite), decreasing = F) 
@@ -304,10 +314,10 @@ plot_bar(tax_glom(physeq_unite_rel, "Phylum"), fill="Phylum") + facet_grid(.~tre
 
 ## filter phyloseq object
 
-```{r filter phyloseq object, echo=F}
+```{r filter phyloseq object}
 
 #remove non-AMF 
-physeq_unite_Filtered <- subset_taxa(physeq_unite, !Phylum %in% c ("p__Basidiomycota", "p__Ascomycota")) #we removed non-AMF and now we have 955 ASVs
+physeq_unite_Filtered <- subset_taxa(physeq_unite, !Phylum %in% c ("p__Basidiomycota", "p__Ascomycota")) #we remove non-AMF and now we have 955 ASVs
 physeq_unite_Filtered
 
 physeq_unite_Filtered_rel <- subset_taxa(physeq_unite_rel, !Phylum %in% c ("p__Basidiomycota", "p__Ascomycota"))
@@ -322,7 +332,7 @@ sort(sample_sums(physeq_unite_Filtered), decreasing = F) #we will discard sample
 
 ## phyloseq object with only AMF (Glomeromycota)
 
-```{r AMF phyloseq, echo=F}
+```{r AMF phyloseq object}
 
 physeq_AMF <- physeq_unite_Filtered
 
@@ -351,7 +361,7 @@ saveRDS(physeq_AMF, "/Users/Katja/Box Sync/PhD Lund Katja/Sequencing/PacBio AMF/
 
 ## rarefaction curves
 
-```{r rarefaction curves, echo=F}
+```{r rarefaction curves}
 
 rarecurve(otu_table(physeq_AMF), step=100, label = FALSE, xlab="Number of sequences",  ylab="Number of ASVs")
 
@@ -359,11 +369,11 @@ barplot(sort(sample_sums(physeq_AMF)),
         ylab= "Number of reads", xlab="Sample ID")
 
 ```
-**To determine the completeness of our sampling efforts, we plotted rarefaction curves for the 48 experimental units analyzed in this study using the “rarecurve” function from the package vegan in R. ASV richness reached clear asymptotes for all experimental units, indicating that there was sufficient sequencing depth to recover the majority of AMF ASVs.**
+**To determine the completeness of our sampling efforts, we plotted rarefaction curves for the 48 samples. Sufficient sequencing depth to recover the majority of AMF ASVs reached.**
 
 #Convert from phyloseq to vegan or from vegan to phyloseq
 
-```{r}
+```{r vegan_phyloseq functions}
 
 # convert the sample_data() within a phyloseq object to a vegan compatible data object
 pssd2veg <- function(physeq) {
@@ -383,200 +393,14 @@ psotu2veg <- function(physeq) {
 ```
 
 # COMMUNITY COMPOSITION 
-#### here I will explore the community composition on different taxonomic levels, ASV, species and genus level
++ here I will explore the community composition on genus level
++ agglomerate on genus level
++ PERMANOVA with BC 
++ plot PCoA/NMDS
 
-#ASV level 
+# GENUS level 
 
-```{r community composition ASV level, echo=F}
-
-## ASV level 
-
-#remove samples with less than 500 reads 
-physeq_unite_Filtered_ASV <- prune_samples(sample_sums(physeq_AMF) >=500, physeq_AMF)
-
-sort(sample_sums(physeq_unite_Filtered_ASV), decreasing = F) #we keep 46 samples
-
-#rarefy on the minimal number of reads
-
-unite_ASV_rare <- rarefy_even_depth(physeq_unite_Filtered_ASV, sample.size = min(sample_sums(physeq_unite_Filtered_ASV)), 6020, replace=F, verbose = T) # rarefication on the lowest number of reads and as a result with 941 ASVs
-
-sort(sample_sums(unite_ASV_rare))
-
-```
-**After rarefaction we have 46 samples, raraefied on 622 reads per sample.**
- 
-##plot ordination on ASV level 
-
-```{r plot ordination ASV level, echo=F}
-
-#PCoA
-
-ASV_unite_pcoa <- phyloseq::ordinate(unite_ASV_rare, method = "PCoA") # building pcoa
-
-plot_ordination(unite_ASV_rare , ASV_unite_pcoa, color = "farming_system", shape = "time") + geom_point(size = 3) + theme_bw()
-plot_ordination(unite_ASV_rare , ASV_unite_pcoa, color = "treatment", shape = "time") + geom_point(size = 3) + theme_bw()
-
-plot_ordination(unite_ASV_rare, ASV_unite_pcoa, type="samples", color="farming_system",label="sample_ID")+
-               geom_text(mapping = aes(label = sample_ID), size =2, vjust = 1.5) +
-               geom_point(size=5) +
-               ggtitle("ASV level") +
-               facet_grid(~time)
-
-```
-**Very difficult to extract the information from the ordination plot.**
-
-###PERMANOVA with BC on ASV level 
-
-```{r permanova ASV level, echo=F}
-
-## Perform PERMANOVA testing for main effects (system, treatment, time) and interactions between time&system&treatment with block in strata
-
-#TSS normalization
-unite_ASV_rel <- transform_sample_counts(unite_ASV_rare, function(x) x/sum(x))
-bray_uniteASV <- phyloseq::distance(unite_ASV_rel, method = "bray")
-
-meta.ASV <- as(sample_data(unite_ASV_rel), "data.frame")
-
-set.seed(1546)
-perm.ASV <- adonis2(bray_uniteASV ~ treatment+time+farming_system+
-                    farming_system:treatment+
-                    treatment:time+
-                    time:farming_system,
-                    strata=meta.ASV$block,
-                    data=meta.ASV,permutations = 999)
-
-perm.ASV
-
-#save output for paper
-permanova_ASV <- as.data.frame(perm.ASV)
-permanova_ASV <- permanova_ASV[, c("Df","SumOfSqs", "R2", "F", "Pr(>F)")]
-write.table(permanova_ASV, "permanova_ASV.txt", sep="\t",quote=F)
-
-```
-**Time effect**
-
-## plot ordination UniFrac on ASV level 
-
-```{r plot unifrac ASV , echo=F}
-
-#weighted Unifrac plot
-ord_pcoa_wuni <- ordinate(unite_ASV_rare, "PCoA", "unifrac", weighted = TRUE)
-barplot(ord_pcoa_wuni$values$Eigenvalues[1:10])
-
-plot_ordination(unite_ASV_rare, ord_pcoa_wuni, color = "farming_system", shape = "time") + geom_point(size = 3) + theme_bw() + ggtitle("Weighted UniFrac")
-plot_ordination(unite_ASV_rare, ord_pcoa_wuni, color = "treatment", shape = "time") + geom_point(size = 3) + theme_bw() + ggtitle("Weighted UniFrac")
-
-#unweighted Unifrac plot
-ord_pcoa_uni <- ordinate(unite_ASV_rare, "PCoA", "unifrac", weighted = FALSE)
-barplot(ord_pcoa_uni$values$Eigenvalues[1:10])
-
-plot_ordination(unite_ASV_rare, ord_pcoa_uni, color = "farming_system", shape = "time") + geom_point(size = 3) + theme_bw() + ggtitle("Unweighted UniFrac")
-plot_ordination(unite_ASV_rare, ord_pcoa_uni, color = "treatment", shape = "time") + geom_point(size = 3) + theme_bw() + ggtitle("Unweighted UniFrac")
-
-```
-
-## weighted Unifrac distance on ASV level 
-
-```{r weighted unifrac distance, echo=F}
-
-wuni_asv <- UniFrac(unite_ASV_rare, weighted = TRUE, normalized = TRUE, parallel = FALSE, fast = TRUE)
-meta.wuni_asv <- as(sample_data(unite_ASV_rare), "data.frame")
-
-set.seed(1420)
-
-perm_mod_wuni_asv <- adonis2(wuni_asv ~ treatment+time+farming_system+
-                                       farming_system:treatment+
-                                       treatment:time+
-                                       time:farming_system,
-                                       strata=meta.wuni_asv$block,
-                                       data = meta.wuni_asv,permutations = 999)
-perm_mod_wuni_asv
-
-```
-**Weighted UniFrac distance. No effect of any of the factors for weighted UniFrac AMF community composition on ASV level.**
-
-## unweighted Unifrac distance on ASV level
-
-```{r unweighted unifrac distance, echo=F}
-
-uni_asv <- UniFrac(unite_ASV_rare, weighted = FALSE, normalized = TRUE, parallel = FALSE, fast = TRUE)
-meta.uni_asv <- as(sample_data(unite_ASV_rare), "data.frame")
-
-set.seed(1420)
-
-perm_mod_uni_asv <- adonis2(uni_asv ~ treatment+time+farming_system+
-                                     farming_system:treatment+
-                                     treatment:time+
-                                     time:farming_system,
-                                     strata=meta.uni_asv$block,
-                                     data = meta.uni_asv,permutations = 999)
-perm_mod_uni_asv
-```
-**Time and system slightly affected the unweighted UniFrac of AMF composition, ASV level.**
-
-#SPECIES level 
-
-```{r species level, echo=F}
-
-physeq_AMF_spec = tax_glom(physeq_AMF, "Species", NArm = T)
-unique(tax_table(physeq_AMF_spec)[,7])
-
-sum(sample_sums(physeq_AMF_spec)) #84542
-sort(sample_sums(physeq_AMF_spec), decreasing = F)
-
-#keep samples with more than 500 reads 
-physeq_AMF_spec_500 <- prune_samples(sample_sums(physeq_AMF_spec) >=500, physeq_AMF_spec)
-sort(sample_sums(physeq_AMF_spec_500))
-
-#rarefaction
-unite_spec_rare <- rarefy_even_depth(physeq_AMF_spec_500, sample.size = min(sample_sums(physeq_AMF_spec_500)), 6020, replace=F, verbose = T) # rarefication on the lowest number of reads 
-
-```
-**Agglomeration on species level and rarefaction on the lowest number of sequencing reads, we have 39 samples.**
-
-##plot ordination on species level
-
-```{r plot ordination on species level,echo=F}
-
-#plot PCoA
-spec_unite_pcoa <- phyloseq::ordinate(unite_spec_rare, method = "PCoA") # building pcoa
-
-plot_ordination(unite_spec_rare, spec_unite_pcoa, color = "treatment", shape = "time") + geom_point(size = 3) + theme_bw()
-plot_ordination(unite_spec_rare, spec_unite_pcoa, color = "farming_system", shape = "time") + geom_point(size = 3) + theme_bw()
-
-#NMDS
-spec_unite_nmds <- phyloseq::ordinate(unite_spec_rare, method = "NMDS") 
-spec_unite_nmds$stress #0.2280184
-
-plot_ordination(unite_spec_rare, spec_unite_nmds, color = "treatment", shape = "time") + geom_point(size = 3) + theme_bw() 
-plot_ordination(unite_spec_rare, spec_unite_nmds, color = "farming_system", shape = "time") + geom_point(size = 3) + theme_bw() 
-
-```
-**NMDS and PCoA on species level**
-
-###PERMANOVA with BC on species level 
-
-```{r permanova on species level, echo=F}
-
-unite_spec_rel <- transform_sample_counts(unite_spec_rare, function(x) x/sum(x))
-bray_unite_spec <- phyloseq::distance(unite_spec_rel, method = "bray")
-
-meta.unite_spec <- as(sample_data(unite_spec_rare), "data.frame")
-
-set.seed(1546)
-perm.spec <- adonis2(bray_unite_spec ~ treatment+time+farming_system+
-                    farming_system:treatment+
-                    treatment:time+
-                    time:farming_system,
-                    strata=meta.unite_spec$block,
-                    data = meta.unite_spec,permutations = 999)
-perm.spec
-```
-**Effect of time on species level on AMF composition.**
-
-#GENUS level 
-
-```{r community composition genus level, echo=F}
+```{r community composition genus level}
 
 ## agglomerate on genus level 
 
@@ -616,7 +440,7 @@ sort(sample_sums(unite_genus_rare))
 
 ##plot ordination on genus level
 
-```{r plot ordination genus level, echo=F}
+```{r plot ordination genus level}
 
 #plot PCoA
 genus_unite_pcoa <- phyloseq::ordinate(unite_genus_rare, method = "PCoA") # building pcoa
@@ -635,7 +459,6 @@ set.seed(0902)
 genus_unite_nmds <- phyloseq::ordinate(unite_genus_rare, method = "NMDS") 
 genus_unite_nmds$stress #0.1902684
 
-
 plot_ordination(unite_genus_rare, genus_unite_nmds, color = "treatment", shape = "time") + geom_point(size = 3) + theme_bw() 
 plot_ordination(unite_genus_rare, genus_unite_nmds, color = "farming_system", shape = "time") + geom_point(size = 3) + theme_bw() 
 
@@ -643,7 +466,7 @@ plot_ordination(unite_genus_rare, genus_unite_nmds, color = "farming_system", sh
 
 # NMDS ordination (genus level)
 
-```{r, echo=F}
+```{r nmds ordination}
 
 #transfer OTU table from phyloseq into a vegan object
 vegan_AMF_genus<-psotu2veg(unite_genus_rare)
@@ -651,10 +474,15 @@ vegan_AMF_genus<-psotu2veg(unite_genus_rare)
 #transfer sample data from phyloseq into a vegan object
 veganSample_AMF_genus<-pssd2veg(unite_genus_rare)
 
+#rename columns from ASV to genus name 
+colnames(vegan_AMF_genus) <- c("g__Paraglomus",  "g__Acaulospora", "g__Septoglomus", "g__Glomus", "g__Claroideoglomus", "g__Gigaspora", "g__Funneliformis", "g__Diversispora", "g__Archaeospora", "g__Ambispora", "g__Dominikia",  "g__Palaeospora")
+vegan_AMF_genus
+
 #calculate the distance matrix
 set.seed(0902)
 nmds_ord <- metaMDS(vegan_AMF_genus, distance = "bray", k=2, trymax=1000, autotransform=T, permutations = 999)
 nmds_ord$stress
+nmds_ord$species
 
 plot_ordination(unite_genus_rare, nmds_ord, color = "farming_system", shape = "time") + geom_point(size = 3) + theme_bw()
 
@@ -663,19 +491,29 @@ goodness(nmds_ord)
 stressplot(nmds_ord)
  
 #this function draws NMDS ordination diagram with sites (=my samples)
-plot(nmds_ord, display = 'sites', type = 't', main = 'Goodness of fit')
+plot(nmds_ord)
+plot(nmds_ord, display = 'sites', type = 't')
+plot(nmds_ord, display = 'species', type = 't')
+
+#species spores 
+envfit(nmds_ord, vegan_AMF_genus) 
+
+plot(nmds_ord, type='n')
+points(nmds_ord, display=c('sites'), choices=c(1, 2), pch=3, col='red')
+text(nmds_ord, display=c('species'), choices=c(1, 2), col='blue', cex=0.7)
 
 ```
 
 #envfit 
 
-```{r, echo=F}
+```{r calculate envfit}
 
 #envfit with metadata 
 nmds_meta <- as(sample_data(unite_genus_rel), "data.frame")
 env_nmds <- nmds_meta[,5:24]
 
 data.scores_nmds = as.data.frame(scores(nmds_ord, display = 'sites')) #save NMDS to dataframe
+species.scores_nmds = as.data.frame(scores(nmds_ord, display = 'species'))
 
 #add grouping variable to dataframe
 data.scores_nmds <- cbind(as.data.frame(data.scores_nmds), farming_system = env_nmds$farming_system, 
@@ -686,7 +524,8 @@ head(data.scores_nmds)
 
 ## calculate envfit for ndms ordination
 ## investigate the soil parameters which may be driving the distribution pattern
-```{r, echo=F}
+
+```{r envfit for nmds}
 
 #calculate envfit
 set.seed(0935)
@@ -714,7 +553,7 @@ en_coord_cat = as.data.frame(scores(env.fit, "factors")) * ordiArrowMul(env.fit)
 
 ## final NMDS plot 
 
-```{r NMDS plot on genus level, echo=F}
+```{r NMDS plot on genus level}
 #plot with significant environmental parameters
 
 nmds_final <- ggplot() + geom_point(data = data.scores_nmds, aes(x = NMDS1, y = NMDS2, colour = farming_system), size = 5, alpha = 0.5) + theme_bw() + scale_colour_manual("Farming system", values=c("grey70", "grey25")) + theme(axis.title = element_text(size = 12, colour = "black"), axis.ticks = element_blank(), axis.text = element_blank(), legend.key = element_blank(), legend.title = element_text(size = 11, colour = "black"), legend.text = element_text(size = 10, colour = "black")) + labs(colour = "farming_system") + annotate("text", x=1.0, y=-0.7, size=5,label= paste("Stress =", round(nmds_ord$stress, digits=2))) + geom_segment(data = sig.env, aes(x = 0, xend=NMDS1, y=0, yend=NMDS2), arrow = arrow(length = unit(0.25, "cm")), colour = "black", lwd=0.3) + ggrepel::geom_text_repel(data = sig.env, aes(x=NMDS1, y=NMDS2, label = env.variables), cex = 4, color="black", direction = "both", segment.size = 0.25) + geom_point(data = en_coord_cat, aes(x = NMDS1, y = NMDS2), shape = "diamond", size = 5, alpha = 0.8, colour = "black") + geom_text(data = en_coord_cat, aes(x = NMDS1, y = NMDS2+0.04), label = row.names(en_coord_cat), colour = "black", fontface = "bold") + theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), panel.background = element_blank(), axis.line = element_line(colour = "black"))
@@ -723,11 +562,15 @@ print(nmds_final)
 ggsave("results_dada2/nmds_final.pdf", width = 40, height = 20, units = "cm")
 ggsave("results_dada2/nmds_final.tiff", width = 40, height = 20, units = "cm")
 
+#ndms with dots representing genus 
+
+ggplot() + geom_point(data = species.scores_nmds, aes(x = NMDS1, y = NMDS2), size = 5, alpha = 0.5) + theme_bw() + scale_colour_manual("Farming system", values=c("grey70", "grey25")) + theme(axis.title = element_text(size = 12, colour = "black"), axis.ticks = element_blank(), axis.text = element_blank(), legend.key = element_blank(), legend.title = element_text(size = 11, colour = "black"), legend.text = element_text(size = 10, colour = "black")) + labs(colour = "farming_system") + annotate("text", x=1.0, y=-0.7, size=5,label= paste("Stress =", round(nmds_ord$stress, digits=2))) + geom_segment(data = sig.env, aes(x = 0, xend=NMDS1, y=0, yend=NMDS2), arrow = arrow(length = unit(0.25, "cm")), colour = "black", lwd=0.3) + ggrepel::geom_text_repel(data = sig.env, aes(x=NMDS1, y=NMDS2, label = env.variables), cex = 4, color="black", direction = "both", segment.size = 0.25) + geom_point(data = en_coord_cat, aes(x = NMDS1, y = NMDS2), shape = "diamond", size = 5, alpha = 0.8, colour = "black") + geom_text(data = en_coord_cat, aes(x = NMDS1, y = NMDS2+0.04), label = row.names(en_coord_cat), colour = "black", fontface = "bold") + theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), panel.background = element_blank(), axis.line = element_line(colour = "black"))
+
 ```
 
 ###PERMANOVA with BC on genus level 
 
-```{r permanova on genus level, echo=F}
+```{r permanova on genus level}
 
 unite_genus_rel <- transform_sample_counts(unite_genus_rare, function(x) x/sum(x))
 bray_unite_genus <- phyloseq::distance(unite_genus_rel, method = "bray")
@@ -754,9 +597,28 @@ write.table(permanova_genus, "permanova_genus.txt", sep="\t",quote=F)
 ```
 **Effect of the time and the farming system on genus composition with BC distance.We should highlight these effects with constrained method.**
 
+```{r bray genus tss}
+
+#tss normalization 
+physeq_AMF_genus_500_TSS <- transform_sample_counts(physeq_AMF_genus_500, function(x) x/sum(x))
+
+bray_tss <- phyloseq::distance(physeq_AMF_genus_500_TSS, method = "bray")
+meta.tss <- as(sample_data(physeq_AMF_genus_500_TSS), "data.frame")
+
+set.seed(1546)
+perm.tss <- adonis2(bray_tss ~ treatment+time+farming_system+
+                    farming_system:treatment+
+                    treatment:time+
+                    time:farming_system,
+                    strata=meta.tss$block,
+                    data = meta.tss,permutations = 999)
+perm.tss
+
+```
+
 ##weighted Unifrac distance on genus level
 
-```{r weighted unifrac distance genus, echo=F}
+```{r weighted unifrac distance genus}
 
 wuni_genus <- UniFrac(unite_genus_rare, weighted = TRUE, normalized = TRUE, parallel = FALSE, fast = TRUE)
 meta.wuni_genus <- as(sample_data(unite_genus_rare), "data.frame")
@@ -775,7 +637,7 @@ perm_mod_wuni_genus
 
 ##unweighted Unifrac distance on genus level
 
-```{r unweighted unifrac distance genus, echo=F}
+```{r unweighted unifrac distance genus}
 
 uni_genus <- UniFrac(unite_genus_rare, weighted = FALSE, normalized = TRUE, parallel = FALSE, fast = TRUE)
 meta.uni_genus <- as(sample_data(unite_genus_rare), "data.frame")
@@ -794,7 +656,7 @@ perm_mod_uni_genus
 # Constrained analysis with db-RDA, to highlight effects
 ###Plot only the variation in your data that explains changes in community composition
 
-```{r plot db-RDA, echo=F}
+```{r plot dbrda}
 
 set.seed(1120)
 
@@ -805,18 +667,44 @@ summary(veganSample_AMF_genus$VWC)
 
 #create the distance matrix
 dbrda <- dbrda(vegan_AMF_genus ~ farming_system+time+Condition(block),veganSample_AMF_genus,dist="bray")
+head(scores(dbrda, display = 'sites'))
+smry <- summary(dbrda)
 
+sppscores(dbrda) <- vegan_AMF_genus
+
+anova(dbrda)  # overall test of the significant of the analysis
 anova(dbrda, by="axis")
 anova(dbrda, by="term", permutations = 999)
+
+ordiplot(dbrda,type="t",scaling=2)
+ordiplot(dbrda,type="t",scaling=1)
+
+#check constrained and unconstrained variance
+dbrda$CCA$tot.chi/dbrda$tot.chi
+
+constrained_eig <- dbrda$CCA$eig/dbrda$tot.chi*100
+unconstrained_eig <- dbrda$CA$eig/dbrda$tot.chi*100
+expl_var <- c(constrained_eig, unconstrained_eig)
+barplot (expl_var[1:20], col = c(rep ('red', length (constrained_eig)), rep ('black', length (unconstrained_eig))),
+         las = 2, ylab = '% variation')
 
 #calculate amount of variation explained by the axis
 b_xlabel<-paste0("db-RDA1"," ","[", round(((dbrda$CCA$eig[1]/dbrda$CA$tot)*100),1), "%]" )
 b_ylabel<-paste0("db-RDA2"," ","[", round(((dbrda$CCA$eig[2]/dbrda$CA$tot)*100),1), "%]" )
 
-#use ggplot to plot the constraint ordination
-library(devtools)
-# devtools::install_github("gavinsimpson/ggvegan")
-library(ggvegan)
+#the two variables explain 17.3% of the variance (Eigenvalues for constrained axes/divided by total variance (inertia))
+#the first constrained axis (RDA1) explains 
+0.8716/7.1219
+#12.2% of the variance
+
+#the second constrained axis (RDA2) explains 
+0.3628/7.1219
+#5.09% of the variance
+
+#first unconstrained axis (MDS1) represents 45% of the total variance, which is more than the variance explained by both explanatory variables together
+#the first two unconstrained explain 56.8% 
+#This means that the dataset may be structured by some strong environmental variable(s)
+
 
 #fortify: transfer into data frame that can be used for ggplot
 scrs <- fortify(dbrda)
@@ -824,99 +712,48 @@ scrs <- fortify(dbrda)
 #select site (-> Samples)
 sites <- subset(scrs, subset = Score == "sites") 
 
-#species <- subset(scrs, subset = Score == "species")
+#select species (-> taxa)
+species <- subset(scrs, subset = Score == "species")
 
 (Time<-veganSample_AMF_genus$time) #choose group variable here
 (System<-veganSample_AMF_genus$farming_system) #choose shape variable
 df <- cbind(sites, Time , System) ## add on the group variable
 
-#make the plot
-dbrda_plot<-ggplot(df, aes(x = dbRDA1, y = dbRDA2)) + 
+```
+
+
+```{r}
+
+df1  <- data.frame(smry$species[,1:2]) #dbrda1, 2
+df2  <- data.frame(smry$centroids[,1:2]) #loadings for dbrda1, 2
+
+
+#this plot dots are plotted
+rda.plot <- ggplot(df1, aes(x=dbRDA1, y=dbRDA2)) + 
+  geom_text(aes(label=rownames(df1)),size=4) + 
   geom_hline(yintercept=0, linetype="dotted") +
   geom_vline(xintercept=0, linetype="dotted") +
-  xlab(b_xlabel)+
-  ylab(b_ylabel)+
-  geom_point( aes(color= System, shape=Time),
-              size = 8,
-              alpha = 0.5,
-              show.legend = T)+
-  scale_shape_manual(values=c(16,17,18), name="")+
-  scale_color_manual(values=c("black","grey"), labels=c("BIODYN", "CONMIN"), name="")+
-  ggtitle("AMF")+
-  theme(legend.position = "bottom", 
-        legend.text=element_text(size=14),
-        legend.title=element_blank(),
-        plot.margin = unit(c(0,3, 3,3), "mm"))
+  coord_fixed()
+  
+#with this command we add arrows
+rda.biplot <- rda.plot + geom_segment(data=df2, aes(x=0, xend=dbRDA1, y=0, yend=dbRDA2), 
+              color="red", arrow=arrow(length=unit(0.01,"npc"))) +
+              geom_text(data=df2, 
+              aes(x=dbRDA1,y=dbRDA2,label=rownames(df2),
+              hjust=0.5*(1-sign(dbRDA1)),vjust=0.5*(1-sign(dbRDA2))), color="red", size=4)
 
-print(dbrda_plot)
+rda.biplot
 
 ```
 
-## add variables to constrained db-RDA
-### Which environmental variables correlate with the ordination projection?
 
-```{r add soil variables, echo=F}
+```{r}
 
-names(veganSample_AMF_genus)
+#plot diamonds
+rda.plot +  geom_point(data = en_coord_cat_dbrda, aes(x = dbRDA1, y = dbRDA2), shape = "diamond", size = 8, alpha = 0.8, colour = "blue") + geom_text(data = en_coord_cat_dbrda, aes(x = dbRDA1, y = dbRDA2), label = row.names(en_coord_cat_dbrda), colour = "blue", fontface = "bold") + theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), panel.background = element_blank(), axis.line = element_line(colour = "black"))
 
-b_treatments_env <- veganSample_AMF_genus[,c("pH", "WC", "BD", "C.N", "SOC", "total.N","weed.cover", "PO4_P", "total.P","root.DW", "WHC", "NLFA", "N.roots", "C.roots", "crop.biomass", "plant.height", "N.shoots", "C.shoots", "VWC")]
-
-#scale variables (z-transform) because they are measured on very different scales
-
-b_treatments_env$VWC<-scale(b_treatments_env$VWC)
-b_treatments_env$pH<-scale(b_treatments_env$pH)
-b_treatments_env$C.N<-scale(b_treatments_env$C.N)
-b_treatments_env$total.N<-scale(b_treatments_env$total.N)
-b_treatments_env$SOC<-scale(b_treatments_env$SOC)
-b_treatments_env$weed.cover<-scale(b_treatments_env$weed.cover)
-b_treatments_env$total.P<-scale(b_treatments_env$total.P)
-b_treatments_env$PO4_P<-scale(b_treatments_env$PO4_P)
-b_treatments_env$root.DW<-scale(b_treatments_env$root.DW)
-b_treatments_env$WHC<-scale(b_treatments_env$WHC)
-b_treatments_env$BD<-scale(b_treatments_env$BD)
-b_treatments_env$plant.height<-scale(b_treatments_env$plant.height)
-b_treatments_env$N.shoots<-scale(b_treatments_env$N.shoots)
-b_treatments_env$C.shoots<-scale(b_treatments_env$C.shoots)
-b_treatments_env$NLFA<-scale(b_treatments_env$NLFA)
-b_treatments_env$crop.biomass<-scale(b_treatments_env$crop.biomass)
-b_treatments_env$WC<-scale(b_treatments_env$WC)
-b_treatments_env$N.roots<-scale(b_treatments_env$N.roots)
-b_treatments_env$C.roots<-scale(b_treatments_env$C.roots)
-
-#Run the actual envfit function, set Strata, to account for the blocking in the DOK
-#use linear combination of scores (display="lc")
-
-set.seed(1722)
-b_vec.sp <- envfit(dbrda, b_treatments_env, strata=veganSample_AMF_genus$block,na.rm = TRUE, display="lc")
-
-#if you want to save results in a df and export run:
-
-#add arrows to the plot
-#now you can decided if you want to plot vectors based on
-#p-values or based on r2 values. I do the latter.
-#shortcutting ef$vectors
-b_A <- as.list(b_vec.sp$vectors)
-(b_A)
-
-#creating the dataframe
-b_r2<-as.data.frame(b_A$r)
-b_r2
-
-#scale arrows for latter plotting according to the correlation stength.
-b_arrows<-as.data.frame(b_A$arrows*4.5*(b_A$r))
-
-b_C<-cbind(b_arrows, b_A$r)
-b_C
-
-#subset the correlations with a r>0.4
-b_vec.sp.df<-droplevels(subset(b_C,b_A$r>=0.4))
-b_vec.sp.df <- cbind(b_vec.sp.df, Species = rownames(b_vec.sp.df))
-b_vec.sp.df
-
-
-## Add environmental variables to the plot
-dbrda_plot_env<-dbrda_plot+
-  geom_segment(data = b_vec.sp.df,
+#plot environmental variables 
+rda.plot + geom_segment(data = sig.env_dbrda,
                aes(x = 0, xend = dbRDA1,
                    y = 0, yend = dbRDA2),
                arrow = arrow(length = unit(2.5, "mm")),
@@ -924,35 +761,83 @@ dbrda_plot_env<-dbrda_plot+
                alpha=1,
                size=0.6,
                lineend ="round",
-               linejoin="round")+
-  geom_text(data=b_vec.sp.df,
-            aes(x=dbRDA1,
-                y=dbRDA2,
-                label=Species),
-            color="black",
-            alpha=0.8,
-            size=5,
-            vjust=0,
-            hjust=0,
-            check_overlap = F,
-            position=position_jitter(width=0.2,height=0.1))
-
-dbrda_plot_env
-
+               linejoin="round") + 
+               ggrepel::geom_text_repel(data = sig.env_dbrda, aes(x=dbRDA1, y=dbRDA2, label =env.variables), cex = 4,                color="blue", direction = "both", segment.size = 0.25)
 ```
 
-#CAP analysis 
+## my version for the dbrda plot 
 
-```{cap genus level, echo=F}
+```{r dbrda katja}
+
+dbrda_katja <- ggplot(df, aes(x = dbRDA1, y = dbRDA2)) + geom_point(aes(colour = System, shape = Time), size = 5,alpha=0.8) +
+    scale_color_manual(values = c("#BEBADA", "#FB8072")) + labs(x = paste0("db-RDA1"," ","[", round(((dbrda$CCA$eig[1]/dbrda$CA$tot)*100),1), "%]" ), y = paste0("db-RDA2"," ","[", round(((dbrda$CCA$eig[2]/dbrda$CA$tot)*100),1), "%]" )) + 
+    geom_vline(xintercept = 0, linetype="dotted") +
+    geom_hline(yintercept = 0, linetype="dotted") +
+    theme_bw() + 
+    theme(text = element_text(size = 14)) + 
+    ggtitle("Distance-based redundancy analysis (dbRDA) of AMF and environmental variables") + theme(axis.title = element_text(size = 12, colour = "black"), axis.ticks = element_blank(), axis.text = element_blank(), legend.key = element_blank(), legend.title = element_text(size = 11, colour = "black"), legend.text = element_text(size = 10, colour = "black")) + labs(colour = "Farming system", shape= "Time of sampling")
+
+print(dbrda_katja)
+
+## environmental variables 
+
+names(veganSample_AMF_genus)
+env_dbrda <- veganSample_AMF_genus[,2:25]
+env_dbrda <- env_dbrda[,-c(2,3,4)]
+
+data.scores_dbrda = as.data.frame(scores(dbrda, display = 'sites')) #save to dataframe
+
+#extract species
+species.scores_dbrda = as.data.frame(scores(dbrda, display = 'species'))
+
+#add grouping variable to dataframe
+data.scores_dbrda <- cbind(as.data.frame(data.scores_dbrda), farming_system = env_dbrda$farming_system, time = env_dbrda$time)
+head(data.scores_dbrda)
+
+set.seed(1722)
+envfit_dbrda <- envfit(dbrda, env_dbrda, strata=veganSample_AMF_genus$block,na.rm = TRUE, display="lc")
+envfit_dbrda
+
+#extract scores from environment
+env.scores_dbrda <- as.data.frame(scores(envfit_dbrda, display = "vectors"))
+env.scores_dbrda <- cbind(env.scores_dbrda, env.variables = rownames(env.scores_dbrda), pval = envfit_dbrda$vectors$pvals)
+
+head(env.scores_dbrda)
+sig.env_dbrda <- subset(env.scores_dbrda, pval<=0.05) #extract only significant soil parameters
+View(sig.env_dbrda)
+
+
+#vectors as continuous, factors as categorical
+#vectors are soil parameters and factors (centroids) are time + farming system
+en_coord_cont_dbrda = as.data.frame(scores(envfit_dbrda, "vectors")) * ordiArrowMul(envfit_dbrda)
+en_coord_cat_dbrda = as.data.frame(scores(envfit_dbrda, "factors")) * ordiArrowMul(envfit_dbrda)
+
+#envfit for species
+spp.fit <- envfit(dbrda, env_dbrda, strata=veganSample_AMF_genus$block,na.rm = TRUE, display="lc")
+
+
+#plot with environmental parameters 
+
+dbrda_katja_env <- dbrda_katja + geom_segment(data = sig.env_dbrda,
+               aes(x = 0, xend = dbRDA1,
+                   y = 0, yend = dbRDA2),
+               arrow = arrow(length = unit(2.5, "mm")),
+               colour = "black",
+               alpha=1,
+               size=0.6,
+               lineend ="round",
+               linejoin="round") + 
+               ggrepel::geom_text_repel(data = sig.env_dbrda, aes(x=dbRDA1, y=dbRDA2, label =env.variables), cex = 4,                color="black", direction = "both", segment.size = 0.25) + geom_point(data = en_coord_cat_dbrda, aes(x                = dbRDA1, y = dbRDA2), shape = "diamond", size = 8, alpha = 0.8, colour = "black") + geom_text(data =                en_coord_cat_dbrda, aes(x = dbRDA1, y = dbRDA2), label = row.names(en_coord_cat_dbrda), colour =                     "black", fontface = "bold") + theme(panel.grid.major = element_blank(), panel.grid.minor =                           element_blank(), panel.background = element_blank(), axis.line = element_line(colour = "black"))
+
+print(dbrda_katja_env)
 
 
 ```
-
-
+**This plot needs to be adjusted a little bit more.**
 
 # ALPHA diversity indices
 
-```{r alpha_div, echo=F}
+```{r alpha_div}
 
 #the alpha diversity metrics were calculated based on samples rarefied to the lowest number of reads, calcualted per sample
 #alpha diversity estimates on rarefied data
@@ -970,7 +855,7 @@ write.csv(alpha_div, "/Users/Katja/Box Sync/PhD Lund Katja/Sequencing/PacBio AMF
 
 ## prepare data for BRMS model
 
-```{r prepare data for BRMS model, echo=F}
+```{r prepare data for BRMS model}
 
 #import data
 head(alpha_div)
@@ -979,15 +864,11 @@ data_brms <- alpha_div
 head(data_brms)
 str(data_brms)
 
-#load libraries
-library(brms); packageVersion("brms") #2.13.0
-library(shinystan); packageVersion("shinystan") #2.5.0
-
 ```
 
 ## BRMS model for observed richness 
 
-```{r BRMS for observed richness, echo=F}
+```{r BRMS for observed richness}
 
 observed_brms <-brm(formula = (Observed)~0+treatment*farming_system+(1|block/plot)+(1|time),
             data = data_brms,
@@ -1023,7 +904,7 @@ marginal_effects(observed_brms)
 
 ## plot BRMS observed richness
 
-```{r plot brms for observed richness, echo=F}
+```{r plot brms for observed richness}
 
 #we can plot the summary of the posterior distribution.
 #make a data frame that contains the parameters of interest
@@ -1117,7 +998,7 @@ mean(diff_brms_obs)
 
 ## BRMS model for Shannon index 
 
-```{r BRMS for observed ASVs richness, echo=F}
+```{r BRMS for observed ASVs richness}
 
 shannon_brms <-brm(formula = (Shannon)~0+treatment*farming_system+(1|block/plot/treatment) + (1|time),
             data = data_brms,
@@ -1152,7 +1033,7 @@ marginal_effects(shannon_brms)
 
 ## plot brms for Shannon index
 
-```{r plot brms for Shannon, echo=F}
+```{r plot brms for Shannon}
 
 #use the function "fitted" from brms
 #to get fitted means of the posterior for treatments
@@ -1236,7 +1117,7 @@ mean(diff_brms_shannon)
 ## phylogenetic diversity, calculated with Faith's PD index
 Faith's PD is defined as the total branch length spanned by the tree including all species in a local community, optionally including the root node of the phylogeny.
 
-```{r faith index, echo=F}
+```{r faith index}
 #The pd function returns two values for each community, Faith's PD and observed species richness (SR).
 
 library(picante); packageVersion("picante") #1.8
@@ -1274,130 +1155,10 @@ print(faith_plot)
 
 ```
 
-## BRMS model for Faith's index
-
-```{r}
-
-faith_brms <-brm(formula = (Faith)~0+treatment*farming_system+(1|block/plot/treatment) + (1|time),
-            data = data_brms,
-            family="gaussian",
-            seed = 1041,
-            warmup = 2000,#The number of warmup iterations should 
-            #not be larger than iter and the default is iter/2.
-            iter = 6000, 
-            chains = 5,
-            control = list(adapt_delta = 0.999, max_treedepth = 15))
-
-# Save an object to a file
-saveRDS(faith_brms, "/Users/Katja/Box Sync/PhD Lund Katja/Sequencing/PacBio AMF/Sequencing data AMF/dada2/AMF_DOK trial/PacBio_AMF_workflow/results_dada2/faith_brms.rds")
-
-#reload it so you don't have to run it again
-faith_brms <- readRDS("/Users/Katja/Box Sync/PhD Lund Katja/Sequencing/PacBio AMF/Sequencing data AMF/dada2/AMF_DOK trial/PacBio_AMF_workflow/results_dada2/faith_brms.rds")
-
-#check model fit 
-yfit_faith <- data_brms$Faith
-yrep_faith <- posterior_predict(faith_brms, draws = length(yfit_faith))
-
-launch_shinystan(faith_brms)
-
-#explore results
-summary(faith_brms)
-
-#marginal effects
-marginal_effects(faith_brms)
-
-```
-**BRMS model for Faith's index is created.**
-
-## plot brms for Faith's index
-
-```{r}
-
-#use the function "fitted" from brms
-#to get fitted means of the posterior for treatments
-#It summarizes from the posterior and calculates meadian with 95% credible interval
-#= we are 95% sure that the real estimate is within this interval
-
-fit_faith = fitted(faith_brms, newdata = newdat, robust=T, re_formula = NA,summary = TRUE,probs = c(0.025, 0.975))
-fit_faith
-
-# no colnames, I add them manually
-fitdf_faith_plot = cbind(newdat, fit_faith)
-fitdf_faith_plot
-
-#prepare and extract results table
-fitdf_faith<-fitdf_faith_plot[, c("farming_system","treatment","Estimate","Q2.5","Q97.5")]
-write.table(fitdf_faith,"/Users/Katja/Box Sync/PhD Lund Katja/Sequencing/PacBio AMF/Sequencing data AMF/dada2/AMF_DOK trial/PacBio_AMF_workflow/results_dada2/faith_alphadiv_brms.txt",sep="\t",quote=F)
-
-#change order of treatment in fitted values
-fitdf_faith_plot$treatment<-factor(fitdf_faith_plot$treatment, levels=c("R", "RC", "C"))
-
-#this is the dataframe i will use for plotting
-pos.dodge <- position_dodge(0.7) # move them .7 to the left and right
-
-#make the final plot
-fitted_faith<-ggplot(data = fitdf_faith_plot, 
-                     aes(x = farming_system,
-                         y =Estimate,
-                         color = treatment,
-                         shape=treatment)) +
-  geom_point(size=6,position=pos.dodge) +
-  geom_errorbar(aes(ymin=Q2.5,
-                    ymax=Q97.5),
-                width=0,
-                position=pos.dodge,
-                size=1.2, show.legend = F) +
-  scale_color_manual(values =  c("palegreen4",
-                                 "steelblue2",
-                                 "tomato2"), name  ="") +
-  scale_shape_manual(values = c(15, 17, 19),name  ="")+
-  xlab("Farming system")+
-  ylab("Faith's phylogenetic index")+theme_bw()
-
-print(fitted_faith)
-ggsave("results_dada2/faith_brms.tiff", width = 18, height = 10, units = "cm")
-
-#get location of the means including credible intervals from here:
-fitdf_faith_plot<-as.data.frame(fitdf_faith_plot)
-
-#if you want, you can also calculate differences between treatments based on the posterior
-##calucate differences with CrI, you need the whole posterior
-#the whole posterior distribution for me. I save it as dataframe (fit1)
-
-fit_faith = as.data.frame(fitted(faith_brms, newdata=newdat,
-                           re_formula = NA, summary = FALSE))
-
-#this is the whole posterior, not summarized as before
-
-#add names
-colnames<-as.character(interaction(newdat$farming_system, newdat$treatment))
-
-colnames(fit_faith)<-colnames
-names(fit_faith)
-
-#calculate the mean differences between systems across the roofs
-BIODYN_brms_faith<-(fit_faith$BIODYN.C+fit_faith$BIODYN.RC+fit_faith$BIODYN.R)/3
-mean(BIODYN_brms_faith)
-sd(BIODYN_brms_faith)
-CONMIN_brms_faith<-(fit_faith$CONMIN.C+fit_faith$CONMIN.RC+fit_faith$CONMIN.R)/3
-mean(CONMIN_brms_faith)
-sd(CONMIN_brms_faith)
-
-diff_brms_faith <- (BIODYN_brms_faith-CONMIN_brms_faith)
-
-#use the quantile function to get mean of that differences with CrI
-round(quantile(diff_brms_faith, probs=c(0.025, 0.5, 0.975)),2)
-#this is a result
-mean(diff_brms_faith)
-
-```
-
 # INDICATOR SPECIES ANALYSIS
 ####to investigate if there are indicators of the farming system, the time of sampling and drought treatment
 
-```{r indicator species analysis, echo=F}
-
-library(indicspecies); packageVersion("indicspecies") #1.7.8
+```{r indicator species analysis}
 
 #Transfer Phyloseq into a vegan ASV table
 ind_analysis <- psotu2veg(physeq_AMF)
@@ -1418,18 +1179,21 @@ length(unique(ind_system))
 
 #indicators for farming system 
 
+set.seed(1809)
 indval_System = multipatt(ind_analysis,ind_system,func = "IndVal", control = how(nperm=999))
 summary(indval_System,indvalcomp=TRUE)
 summary(indval_System, alpha=1,indvalcomp=TRUE)
 
 #indicators for drought treatment
 
+set.seed(1809)
 indval_Treatment = multipatt(ind_analysis,ind_treatment,func = "IndVal", control = how(nperm=999))
 summary(indval_Treatment,indvalcomp=TRUE)
 summary(indval_Treatment, alpha=1,indvalcomp=TRUE)
 
 #indicators for the time of sampling
 
+set.seed(1809)
 indval_Time = multipatt(ind_analysis,ind_time,func = "IndVal", control = how(nperm=999))
 summary(indval_Time,indvalcomp=TRUE)
 summary(indval_Time, alpha=1,indvalcomp=TRUE)
@@ -1440,7 +1204,7 @@ summary(indval_Time, alpha=1,indvalcomp=TRUE)
 
 ## indicators for the farming systems
 
-```{r indicators system, echo=F}
+```{r indicators system}
 
 indicators_system <- indval_System$sign
 
@@ -1458,7 +1222,7 @@ length(unique(rownames(CONMIN_BIODYN)))
 
 ## indicators for the drought treatment
 
-```{r indicators treatment, echo=F}
+```{r indicators treatment}
 
 indicators_treatment <- indval_Treatment$sign
 
@@ -1477,7 +1241,7 @@ length(unique(rownames(R_C_RC)))
 
 ## indicators for the time of sampling
 
-```{r time, echo=F}
+```{r indicators time}
 
 indicators_time <- indval_Time$sign
 
@@ -1502,13 +1266,12 @@ View(unite_ASV_rel@otu_table)
 ```
 
 ## Class level
++ 3 classes 
++ Glomeromycetes as the most abundant 
 
-```{r, echo=F}
-
-library(ggpubr)
+```{r investigate class level}
 
 #taxonomy_AMF
-#we remove unassigned, in particular for stats
 
 unique(tax_table(unite_ASV_rel)[,3])
 
@@ -1516,53 +1279,51 @@ subset_class <- subset_taxa(unite_ASV_rel, Class %in% c("c__Paraglomeromycetes",
 
 subset_class
 subset_class = prune_samples(sample_sums(subset_class)>0, subset_class)
+
 data_class <- subset_class %>%
               tax_glom(taxrank = "Class") %>%     #agglomerate at class level
               psmelt() %>%                        #melt to long format
-              filter(Abundance > 0.01) %>%        #small group (<1%) are removed
               arrange(Class)                      #sort data frame alphabetically by class
 
-#PERMANOVA
-set.seed(8899)
-AMF_class_dist <- phyloseq::distance(subset_class, method="bray")
-adonis_AMF_class <- adonis2(AMF_class_dist ~ treatment+time+farming_system+
-                                             farming_system:treatment+treatment:time,
-                                             time:farming_system,                                                                                                 strata=meta.ASV$block,
-                                             data=meta.ASV,permutations = 999)
-adonis_AMF_class
-#time: 0.033
 
-adonis_AMF_class.df <- as.data.frame(adonis_AMF_class)
-adonis_AMF_class.df<-adonis_AMF_class.df[, c("Df","SumOfSqs", "R2", "F", "Pr(>F)")]
-write.table(adonis_AMF_class.df,"adonis_AMF_class.txt",sep="\t",quote=F)
+# To change plot order of facet wrap,
+# change the order of varible levels with factor()
+data_class$treatment <- factor(data_class$treatment, levels = c("R", "RC", "C"))
+
 
 #plot AMF class 
-
-boxplot_class_treatment <- ggplot(data_class, aes(x=Class, y=Abundance, fill=treatment)) + stat_boxplot(geom = "errorbar") + xlab("Class") + ylab("Relative abundance") + scale_x_discrete(limits=c("c__Glomeromycetes","c__Paraglomeromycetes","c__Archaeosporomycetes")) + geom_boxplot() + scale_fill_brewer(palette = "Greys") + theme(axis.text.x = element_text(size = 7.5)) + theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), panel.background = element_blank(), axis.line = element_line(colour = "black")) + labs(fill="Drought treatment") + scale_y_continuous(limits=c(0.00,1.00))
-
-print(boxplot_class_treatment)
-ggsave("class_drought_final.tiff", width = 18, height = 10, units = "cm")
-
-boxplot_class_system <- ggplot(data_class, aes(x=Class, y=Abundance, fill=farming_system)) + stat_boxplot(geom = "errorbar") + xlab("Class") + ylab("Relative abundance") + scale_x_discrete(limits=c("c__Glomeromycetes","c__Paraglomeromycetes","c__Archaeosporomycetes")) + geom_boxplot() + scale_fill_manual(values=c("grey70", "grey25")) + theme(axis.text.x = element_text(size = 7.5)) + theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), panel.background = element_blank(), axis.line = element_line(colour = "black")) + labs(fill="Farming system") + scale_y_continuous(limits=c(0.00,1.00))
-
-print(boxplot_class_system)
-ggsave("class_system_final.tiff", width = 18, height = 10, units = "cm")
-
-#final figure for the publication
-
-boxplot_class_treat_sys <- ggplot(data_class, aes(x=Class, y=Abundance, fill=farming_system)) + stat_boxplot(geom = "errorbar") + xlab("Class") + ylab("Relative abundance")+ scale_x_discrete(limits=c("c__Glomeromycetes","c__Paraglomeromycetes", "c__Archaeosporomycetes")) + geom_boxplot() + scale_fill_manual(values=c("grey70", "grey25")) + theme(axis.text.x = element_text(size = 7)) + theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), panel.background = element_blank(), axis.line = element_line(colour = "black")) + labs(fill = "Farming system") + facet_wrap(.~treatment, scales="free_x") + theme(axis.text.x = element_text(angle = 35, hjust = 1)) + theme(axis.text.x = element_text(size = 8)) + scale_y_continuous(limits=c(0.00,1.00))
-
-print(boxplot_class_treat_sys)
-
-ggsave("class_level_final.pdf", width = 40, height = 20, units = "cm")
-ggsave("class_level_final.tiff", width = 18, height = 10, units = "cm")
+ggplot(data_class) + geom_col(mapping = aes(x = treatment:farming_system, y = Abundance, fill = Class), position = "fill", show.legend = TRUE) + scale_fill_brewer(palette="Dark2") + theme(axis.text.x = element_text(angle = 35, hjust = 1)) + scale_x_discrete(name ="Treatment:Farming system") + scale_fill_discrete(labels=c("Paraglomeromycetes", "Glomeromycetes", "Archaeosporomycetes")) + facet_wrap(~time)
 
 ```
-**Three AMF classes were extracted. Taxonomic composition on AMF class level is significantly affected by the time of sampling. Boxplots show the relative abundance of AMF classes in the two farming systems under the drought treatments.**
 
-## Focus on Glomeromycetes class and three orders within it 
+## All orders 
++ there are 5 orders
 
-```{r, echo=FALSE}
+```{r all orders AMF}
+
+unique(tax_table(unite_ASV_rel)[,4])
+
+subset_orders_AMF <- subset_taxa(unite_ASV_rel, Order %in% c("o__Diversisporales","o__Glomerales","o__Gigasporales", "o__Paraglomerales", "o__Archaeosporales"))
+
+orders_AMF = prune_samples(sample_sums(subset_orders_AMF)>0, subset_orders_AMF)
+
+orders_AMF <- orders_AMF %>%
+              tax_glom(taxrank = "Order") %>%      #agglomerate at order level
+              psmelt() %>%                         #melt to long format
+              arrange(Order)
+
+# To change plot order of facet wrap,
+# change the order of varible levels with factor()
+orders_AMF$treatment <- factor(orders_AMF$treatment, levels = c("R", "RC", "C"))
+
+ggplot(orders_AMF) + geom_col(mapping = aes(x = treatment:farming_system, y = Abundance, fill = Order), position = "fill", show.legend = TRUE) + scale_fill_brewer(palette="Dark2") + theme(axis.text.x = element_text(angle = 35, hjust = 1)) + scale_x_discrete(name ="Treatment:Farming system") + scale_fill_discrete(labels=c("Archaeosporales", "Diversisporales", "Glomerales", "Paraglomerales")) + facet_wrap(~time)
+
+```
+
+## Focus on Glomeromycetes class
++ focus on Glomeromyctes class, as it is the most abundant one and three orders within it
+
+```{r Glomeromycetes class}
 
 unique(tax_table(unite_ASV_rel)[,4])
 
@@ -1573,50 +1334,20 @@ glomeromycetes_orders = prune_samples(sample_sums(subset_orders)>0, subset_order
 glomeromycetes_orders <- glomeromycetes_orders %>%
                          tax_glom(taxrank = "Order") %>%      #agglomerate at order level
                          psmelt() %>%                         #melt to long format
-                         filter(Abundance > 0.01) %>%         #small group (<1%) are removed
                          arrange(Order)                       #sort data frame alphabetically by order
 
-#final figure for the publication
+# To change plot order of facet wrap,
+# change the order of varible levels with factor()
+glomeromycetes_orders$treatment <- factor(glomeromycetes_orders$treatment, levels = c("R", "RC", "C"))
 
-glomeromycetes_plot <- ggplot(glomeromycetes_orders, aes(x=Order, y=Abundance, fill=farming_system)) + stat_boxplot(geom = "errorbar") + xlab("AMF orders within Glomeromycetes") + ylab("Relative abundance") +  scale_x_discrete(limits=c("o__Diversisporales","o__Glomerales")) + geom_boxplot() + scale_fill_manual(values=c("grey70", "grey25")) + theme(axis.text.x = element_text(size = 7.5)) + theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), panel.background = element_blank(), axis.line = element_line(colour = "black")) + facet_wrap(.~treatment, scales="free_x") + theme(axis.text.x = element_text(angle = 45, hjust = 1)) + theme(axis.text.x = element_text(size = 10)) + scale_y_continuous(limits=c(0.00,1.00)) + labs(fill="Farming system")
-
-print(glomeromycetes_plot)
-
-ggsave("glomeromycetes_only.pdf", width = 40, height = 20, units = "cm")
-ggsave("glomeromycetes_only.tiff", width = 18, height = 10, units = "cm")
-
-boxplot_glomeromycetes_treatment <- ggplot(glomeromycetes_orders, aes(x=Order, y=Abundance, fill=treatment)) + stat_boxplot(geom = "errorbar") + xlab("AMF orders within Glomeromycetes") + ylab("Relative abundance") + scale_x_discrete(limits=c("o__Diversisporales","o__Glomerales")) + geom_boxplot() + scale_fill_brewer(palette = "Greys") + theme(axis.text.x = element_text(size = 7.5)) + theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), panel.background = element_blank(), axis.line = element_line(colour = "black")) + labs(fill="Drought treatment") + scale_y_continuous(limits=c(0.00,1.00))
-
-print(boxplot_glomeromycetes_treatment)
-ggsave("glomeromycetes_only_treat.tiff", width = 18, height = 10, units = "cm")
-
-#boxplot system
-
-boxplot_glomeromycetes_system <- ggplot(glomeromycetes_orders, aes(x=Order, y=Abundance, fill=farming_system)) + stat_boxplot(geom = "errorbar") + xlab("AMF orders within Glomeromycetes") + ylab("Relative abundance") + scale_x_discrete(limits=c("o__Diversisporales","o__Glomerales")) + geom_boxplot() + scale_fill_manual(values=c("grey70", "grey25")) + theme(axis.text.x = element_text(size = 7.5)) + theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), panel.background = element_blank(), axis.line = element_line(colour = "black")) + labs(fill="Farming system") + scale_y_continuous(limits=c(0.00,1.00)) + theme(axis.text.x = element_text(angle = 35, hjust = 1))
-
-print(boxplot_glomeromycetes_system)
-ggsave("glomeromycetes_only_system.tiff", width = 18, height = 10, units = "cm")
-
-#PERMANOVA
-set.seed(1556)
-AMF_glomeromycetes_dist <-phyloseq::distance(subset_orders, method="bray")
-adonis_glomeromycetes <-adonis2(AMF_glomeromycetes_dist ~ 
-                                treatment+time+farming_system+
-                                farming_system:treatment+treatment:time,time:farming_system,                                                         strata=meta.ASV$block,
-                                data=meta.ASV,permutations = 999)
-adonis_glomeromycetes
-#no effect
-
-adonis_glomeromycetes.df <- as.data.frame(adonis_glomeromycetes)
-adonis_glomeromycetes.df<-adonis_glomeromycetes.df[, c("Df","SumOfSqs", "R2", "F", "Pr(>F)")]
-write.table(adonis_glomeromycetes.df,"adonis_glomeromycetes.txt",sep="\t",quote=F)
+ggplot(glomeromycetes_orders) + geom_col(mapping = aes(x = treatment:farming_system, y = Abundance, fill = Order), position = "fill", show.legend = TRUE) + scale_fill_brewer(palette="Dark2") + theme(axis.text.x = element_text(angle = 35, hjust = 1)) + scale_x_discrete(name ="Treatment:Farming system") + scale_fill_discrete(labels=c("Diversisporales", "Glomerales")) + facet_wrap(~time)
 
 ```
-**Three orders within class Glomeromycetes were investigated. They were significantly affected by the time of sampling. Boxplot show the relative abundance of three orders, interestingly Gigasporales under RC was only in BIODYN.**
 
 ## Family level 
++ there are 8 families 
 
-```{r, echo=F}
+```{r family level}
 
 unique(tax_table(unite_ASV_rel)[,5])
 
@@ -1628,100 +1359,67 @@ subset_family = prune_samples(sample_sums(subset_family)>0, subset_family)
 data_family <- subset_family %>%
                tax_glom(taxrank = "Family") %>%
                psmelt() %>%
-               filter(Abundance > 0.01) %>%
                arrange(Family)
 
-#PERMANOVA
-set.seed(8899)
-AMF_family_dist <-phyloseq::distance(subset_family, method="bray")
-adonis_AMF_family <-adonis2(AMF_family_dist ~ treatment+time+farming_system+
-                                            farming_system:treatment+treatment:time,
-                                            time:farming_system,                                                                                                 strata=meta.ASV$block,
-                                            data=meta.ASV,permutations = 999)
-adonis_AMF_family
-#time: 0.022
+# To change plot order of facet wrap,
+# change the order of varible levels with factor()
+data_family$treatment <- factor(data_family$treatment, levels = c("R", "RC", "C"))
 
-adonis_AMF_family.df <- as.data.frame(adonis_AMF_family)
-adonis_AMF_family.df<-adonis_AMF_family.df[, c("Df","SumOfSqs", "R2", "F", "Pr(>F)")]
-write.table(adonis_AMF_family.df,"adonis_AMF_family.txt",sep="\t",quote=F)
-
-#boxplot treatment
-
-boxplot_family_treatment <- ggplot(data_family, aes(x=Family, y=Abundance, fill=treatment)) + stat_boxplot(geom = "errorbar") + xlab("Family") + ylab("Relative abundance") + scale_x_discrete(limits=c("f__Acaulosporaceae", "f__Glomeraceae", "f__Diversisporaceae", "f__Archaeosporaceae", "f__Ambisporaceae", "f__Claroideoglomeraceae", "f__Paraglomeraceae")) + geom_boxplot() + scale_fill_brewer(palette = "Greys") + theme(axis.text.x = element_text(size = 7.5)) + theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), panel.background = element_blank(), axis.line = element_line(colour = "black")) + labs(fill="Drought treatment") + scale_y_continuous(limits=c(0.00,1.00)) + theme(axis.text.x = element_text(angle = 35, hjust = 1))
-
-print(boxplot_family_treatment)
-ggsave("family_level_treat.tiff", width = 18, height = 10, units = "cm")
-
-#boxplot system
-
-boxplot_family_system <- ggplot(data_family, aes(x=Family, y=Abundance, fill=farming_system)) + stat_boxplot(geom = "errorbar") + xlab("Family") + ylab("Relative abundance") + scale_x_discrete(limits=c("f__Acaulosporaceae", "f__Glomeraceae", "f__Diversisporaceae", "f__Archaeosporaceae", "f__Ambisporaceae", "f__Claroideoglomeraceae", "f__Paraglomeraceae")) + geom_boxplot() + scale_fill_manual(values=c("grey70", "grey25")) + theme(axis.text.x = element_text(size = 7.5)) + theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), panel.background = element_blank(), axis.line = element_line(colour = "black")) + labs(fill="Farming system") + scale_y_continuous(limits=c(0.00,1.00)) + theme(axis.text.x = element_text(angle = 35, hjust = 1))
-
-print(boxplot_family_system)
-ggsave("family_level_system.tiff", width = 18, height = 10, units = "cm")
-
-#boxplot merged
-
-boxplot_family_treat_sys <- ggplot(data_family, aes(x=Family, y=Abundance, fill=farming_system)) + stat_boxplot(geom = "errorbar") + xlab("Family") + ylab("Relative abundance")+ scale_x_discrete(limits=c("f__Acaulosporaceae", "f__Glomeraceae", "f__Diversisporaceae", "f__Archaeosporaceae", "f__Ambisporaceae", "f__Claroideoglomeraceae", "f__Paraglomeraceae")) + geom_boxplot() + scale_fill_manual(values=c("grey70", "grey25")) + theme(axis.text.x = element_text(size = 7)) + theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), panel.background = element_blank(), axis.line = element_line(colour = "black")) +
-theme(axis.text.x = element_text(angle = 45, hjust = 1)) + facet_wrap(.~treatment, scales="free_x") + theme(axis.text.x = element_text(size = 10)) + labs(fill="Farming system") + scale_y_continuous(limits=c(0.00,1.00))
-
-print(boxplot_family_treat_sys)
-ggsave("family_level_final.tiff", width = 20, height = 10, units = "cm")
+ggplot(data_family) + geom_col(mapping = aes(x = treatment:farming_system, y = Abundance, fill = Family), position = "fill", show.legend = TRUE) + scale_fill_brewer(palette="Dark2") + theme(axis.text.x = element_text(angle = 35, hjust = 1)) + scale_x_discrete(name ="Treatment:Farming system") + scale_fill_discrete(labels=c("Acaulosporaceae", "Ambisporaceae", "Archaeosporaceae", "Claroideoglomeraceae", "Diversisporaceae", "Glomeraceae", "Paraglomeraceae")) + facet_wrap(~time)
 
 ```
-**When investigating all 8 AMF families, they are significantly affected by the time of sampling.**
 
 ## Genus level 
++ 12 genera
++ here we include NA
 
-```{r, echo=F}
+```{r genus level}
 
 #here we will include unassigned
 
 unique(tax_table(unite_ASV_rel)[,6])
 
-subset_genera <- subset_taxa(unite_ASV_rel, Genus %in% c("g__Acaulospora", "g__Glomus", "g__Palaeospora", "NA", "g__Diversispora", "g__Funneliformis", "g__Paraglomus", "g__Ambispora", "g__Claroideoglomus", "g__Gigaspora", "Cetraspora", "g__Dominikia", "g__Archaeospora"))
+subset_genera <- subset_taxa(unite_ASV_rel, Genus %in% c("g__Acaulospora", "g__Glomus", "g__Palaeospora", "NA", "g__Diversispora", "g__Funneliformis", "g__Paraglomus", "g__Ambispora", "g__Claroideoglomus", "g__Gigaspora", "g__Dominikia", "g__Archaeospora", "g__Septoglomus"))
 
 subset_genera = prune_samples(sample_sums(subset_genera)>0, subset_genera)
+
 data_genera <- subset_genera %>%
                tax_glom(taxrank = "Genus") %>%
                psmelt() %>%
                filter(Abundance > 0.01) %>%
                arrange (Genus)
-               
-#PERMANOVA
-set.seed(8899)
-AMF_genus_dist <-phyloseq::distance(subset_genera, method="bray")
-adonis_AMF_genus <-adonis2(AMF_genus_dist ~ treatment+time+farming_system+
-                                            farming_system:treatment+treatment:time,
-                                            time:farming_system,                                                                                                 strata=meta.ASV$block,
-                                            data=meta.ASV,permutations = 999)
-adonis_AMF_genus
-#only time effect
 
-adonis_AMF_genus.df <- as.data.frame(adonis_AMF_genus)
-adonis_AMF_genus.df<-adonis_AMF_genus.df[, c("Df","SumOfSqs", "R2", "F", "Pr(>F)")]
-write.table(adonis_AMF_genus.df,"adonis_AMF_genus.txt",sep="\t",quote=F)
+#include NA
+data_genera_NA <- subset_genera %>%
+                  psmelt() %>%
+                  arrange (Genus)
 
-#boxplot
+# To change plot order of facet wrap,
+# change the order of varible levels with factor()
+data_genera$treatment <- factor(data_genera$treatment, levels = c("R", "RC", "C"))
 
-genera_plot <- ggplot(data_genera, aes(x=Genus, y=Abundance, fill=farming_system)) + stat_boxplot(geom = "errorbar") + xlab("Genus") + ylab("Relative abundance") + geom_boxplot() + scale_fill_manual(values=c("grey70", "grey25")) + scale_x_discrete(limits=c("g__Acaulospora", "g__Paraglomus", "g__Diversispora", "g__Funneliformis", "g__Ambispora", "g__Palaeospora", "g__Claroideoglomus", "g__Archaeospora")) + theme(axis.text.x = element_text(size = 8)) + theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), panel.background = element_blank(), axis.line = element_line(colour = "black")) + theme(axis.text.x = element_text(angle = 35, hjust = 1)) + labs(fill="Farming system") + scale_y_continuous(limits=c(0.00,1.00))
+ggplot(data_genera) + geom_col(mapping = aes(x = treatment:farming_system, y = Abundance, fill = Genus), position = "fill", show.legend = TRUE) + scale_fill_brewer(palette="Dark2") + theme(axis.text.x = element_text(angle = 35, hjust = 1)) + scale_x_discrete(name ="Treatment:Farming system") + scale_fill_discrete(labels=c("Acaulospora", "Ambispora", "Archaeospora", "Claroideoglomus", "Diversispora", "Funneliformis", "Palaeospora", "Paraglomus", "Septoglomus", "Gigaspora", "Dominikia", "Glomus")) + facet_wrap(~time)
 
-ggsave("genus_level_final.pdf", width = 40, height = 20, units = "cm")
-ggsave("genus_level_final.tiff", width = 18, height = 10, units = "cm")
+#with NA as others
+ggplot(data_genera_NA) + geom_col(mapping = aes(x = treatment:farming_system, y = Abundance, fill = Genus), position = "fill", show.legend = TRUE) + scale_fill_brewer(palette="Dark2") + theme(axis.text.x = element_text(angle = 35, hjust = 1)) + scale_x_discrete(name ="Treatment:Farming system") + scale_fill_discrete(labels=c("Acaulospora", "Ambispora", "Archaeospora", "Claroideoglomus", "Diversispora", "Funneliformis", "Palaeospora", "Paraglomus", "Septoglomus", "Gigaspora", "Dominikia", "Glomus", "Other")) + facet_wrap(~time)
 
-#additional 
-genera_plot + facet_wrap(.~treatment, scales="free_x") + theme(axis.text.x = element_text(size = 10))
-
-genera_treatment <- ggplot(data_genera, aes(x=Genus, y=Abundance, fill=treatment)) + stat_boxplot(geom = "errorbar") + xlab("Genus") + ylab("Relative abundance") + scale_x_discrete(limits=c("g__Acaulospora", "g__Paraglomus", "g__Diversispora", "g__Funneliformis", "g__Ambispora", "g__Palaeospora", "g__Claroideoglomus")) + geom_boxplot() + scale_fill_brewer(palette = "Greys") + theme(axis.text.x = element_text(size = 7.5)) + theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), panel.background = element_blank(), axis.line = element_line(colour = "black")) + labs(fill="Drought treatment") + scale_y_continuous(limits=c(0.00,1.00)) + theme(axis.text.x = element_text(angle = 35, hjust = 1))
-
-print(genera_treatment)
-ggsave("genera_treat.tiff", width = 18, height = 10, units = "cm")
+ggplot(data_genera) + geom_col(mapping = aes(x = treatment, y = Abundance, fill = Genus), position = "fill", show.legend = TRUE) + scale_fill_brewer(palette="Dark2") + theme(axis.text.x = element_text(angle = 35, hjust = 1)) + scale_x_discrete(name ="Treatment") + scale_fill_discrete(labels=c("Acaulospora", "Ambispora", "Archaeospora", "Claroideoglomus", "Diversispora", "Funneliformis", "Palaeospora", "Paraglomus", "Septoglomus", "Gigaspora", "Dominikia", "Glomus")) + facet_wrap(~time)          
 
 ```
-**When filtering on the abundance is performed, we kept 9 genera (8 assigned + 1 unassigned). Only signficant effect of the time of sampling.**
+
+# Summary 
++ UNITE database was used for taxonomic assignments
++ samples with less than 500 were removed
++ rarefaction on the lowest number of reads
++ AMF diversity: neither farming system nor drought treatment did have an effect on the two diversity metrics, observed number of ASVs and Shannon’s index of AMF
++ AMF community composition: data agglomerated on genus level, farming effect over time 
++ farming and time effect need to be highlighted with constrained method 
++ except root.DW and PO4_P all soil parameters had significant relations on the AMF community composition
++ there are indicators for system (CONMIN), time of the sampling and treatment 
 
 # Session Info
 
-```{r sessionInfo}
+```{r sessionInfo, include=TRUE, echo=TRUE}
 sessionInfo()
 ```
 
