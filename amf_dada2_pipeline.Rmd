@@ -1,0 +1,259 @@
+---
+title: "amf_dada2_steps"
+author: "Katja Kozjek"
+date: "09/09/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+
+knitr::opts_chunk$set(warning = FALSE, message = FALSE)
+
+```
+
+# Prepare the environment
+
+```{r setting the environment, message=F, warning=F, echo=F}
+
+#clean everything
+#rm(list=ls())
+
+#load libraries
+library(dada2); packageVersion("dada2") 
+library(phyloseq); packageVersion("phyloseq") 
+library(vegan); packageVersion("vegan") 
+library(ggplot2); packageVersion("ggplot2")
+library(dplyr); packageVersion("dplyr")
+library(tidyverse); packageVersion("tidyverse")
+library(ggpubr); packageVersion("ggpubr")
+library(devtools); packageVersion("devtools")
+library(ape); packageVersion("ape")
+library(brms); packageVersion("brms") 
+library(shinystan); packageVersion("shinystan") 
+library(picante); packageVersion("picante")
+library(indicspecies); packageVersion("indicspecies")
+library(ggvegan); packageVersion("ggvegan")
+
+```
+
+# Start with DADA2 pipeline, create ASVs from fastq files
+## set path
+
+```{r set path}
+
+path_fastq <- "/Users/Katja/Box Sync/PhD Lund Katja/Sequencing/PacBio AMF/Sequencing data AMF/dada2/AMF_DOK trial/samples"
+list.files(path_fastq) #listing all files in the path
+fns <- sort(list.files(path_fastq, pattern=".fq", full.names = TRUE)) #selection of all fastq files
+sample.names <- sapply(strsplit(basename(fns), "_"), `[`, 2)
+print(sample.names)
+
+```
+
+## visualize sequence quality 
+
+```{r sequence quality, echo=F}
+
+plotQualityProfile(fns[1:6])
+plotQualityProfile(fns[7:12])
+plotQualityProfile(fns[13:18])
+plotQualityProfile(fns[19:24])
+plotQualityProfile(fns[25:30])
+plotQualityProfile(fns[31:36])
+plotQualityProfile(fns[37:42])
+plotQualityProfile(fns[43:48])
+
+```
+
+## length distribution of the original sequences 
+
+```{r original length distribution}
+
+#inspect length distribution of sequences to determine how to filter the sequences
+length_fns <- lapply(path_fastq, function(fn) nchar(getSequences(fn)))
+length <- do.call(c, length_fns)
+hist(length, 100) #looks good, majority between 1400 and 1700
+mean(length); median(length) 
+
+```
+
+## filter and trim original sequences 
+
+```{r filter + trim}
+
+#place filtered files in filtered/ subdirectory 
+filt_path <- file.path(path_fastq, "filtered") 
+filt_fns <- file.path(path_fastq, "filtered", paste0(sample.names, "_filt.fq.gz"))
+names(filt_fns) <- sample.names
+
+#filter from 1400 to 1650
+filt_out <- filterAndTrim(fns, filt_fns, minQ=2, minLen=1450, maxLen=1650, maxN=0, rm.phix=FALSE, maxEE=3, multithread = FALSE) #we retain only reads with fewer than three exp. errors 
+print(filt_out)
+
+#csv file containing number of input and output/filtered sequences
+write.csv(filt_out, "/Users/Katja/Box Sync/PhD Lund Katja/Sequencing/PacBio AMF/Sequencing data AMF/dada2/AMF_DOK trial/PacBio_AMF_workflow/results_dada2/filtered_seq.csv") 
+
+```
+
+## inspect length distribution of filtered sequences
+
+```{r length distribution filtered sequences}
+
+length_fns_filt <- lapply(filt_path, function(fn) nchar(getSequences(fn)))
+length_filt <- do.call(c, length_fns_filt)
+hist(length_filt, 100)
+mean(length_filt); median(length_filt)
+#1529.076
+#1529
+
+```
+
+## dereplication of identical reads
+ + dereplication combines all identical sequencing reads into into “unique sequences” with a corresponding “abundance”: the number of reads with that unique sequence
++ collapsing together all reads that encode the same sequence
+
+```{r dereplication}
+
+#collapse identical sequences
+derep <- derepFastq(filt_fns, verbose=TRUE)
+names(derep) <- sample.names #name the derep-class objects by the sample names
+
+```
+
+## error rates
++ error rates for each possible transition
+
+```{r error rates}
+
+set.seed(100)
+err <- learnErrors(derep, errorEstimationFunction = PacBioErrfun, BAND_SIZE = 32, verbose = TRUE)  
+#103155500 total bases in 67095 reads from 12 samples will be used for learning the error rates.
+
+plotErrors(err)
+plotErrors(err, nominalQ=TRUE) #red line shows the error rates, the estimated error rates (black line) are a good fit to the observed rates (points), error rates should drop with the increased quality 
+
+```
+
+## denoise 
++ infer the sequence variants in each sample
++ separate true biological sequences from errors
+
+```{r denoise}
+
+dada_dd <- dada(derep, err = err, BAND_SIZE = 32, multithread=TRUE, verbose = TRUE, pool = "pseudo") #number of true sequences
+dada_dd[[1]] #check only the first sample
+
+```
+
+# Construct sequence variant (ASV) table, a higher-resolution version of the OTU table produced by traditional methods
+
+```{r ASV table}
+
+seqtab <- makeSequenceTable(dada_dd); dim(seqtab) #48 972
+table(nchar(getSequences(seqtab))) #distibution of sequence lengths 
+#shortest 1468, longest 1634
+
+saveRDS(seqtab, "all_seq.rds")
+
+#extract original sequences, belonging to 972 ASVs
+
+asv_seqs_original <- colnames(seqtab)
+asv_headers_original <- vector(dim(seqtab)[2], mode = "character")
+for (i in 1:dim(seqtab)[2]) {
+  asv_headers_original[i] <- paste(">ASV", i, sep = "_")
+}
+asv_fasta_original <- c(rbind(asv_headers_original, asv_seqs_original))
+write(asv_fasta_original, "ASVs_original.fasta")
+
+```
+
+## remove chimeras 
+
+```{r remove chimeras}
+
+seqtab.nochim <- removeBimeraDenovo(seqtab, method="consensus", multithread=TRUE, verbose=TRUE)
+dim(seqtab.nochim) 
+#48 962
+#chimeras removed 
+#seqtab.nochim file is the final file, samples and sequences that represents ASVs
+
+#what proportion of the sequence variants are chimeras
+sum(seqtab.nochim)/sum(seqtab) 
+#0.9958734
+1-sum(seqtab.nochim)/sum(seqtab)  #0.004126584
+
+```
+
+## summary, track retained sequences
+
+```{r summarize}
+
+getN <- function(x) sum(getUniques(x))
+track <- cbind(filt_out, sapply(dada_dd, getN), rowSums(seqtab.nochim))
+colnames(track) <- c("input", "filtered", "denoised", "nonchim")
+rownames(track) <- sample.names
+print(track)
+class(track) #it is a matrix
+
+#save summary 
+write.csv(track, "/Users/Katja/Box Sync/PhD Lund Katja/Sequencing/PacBio AMF/Sequencing data AMF/dada2/AMF_DOK trial/PacBio_AMF_workflow/results_dada2/summary_seq.csv")
+
+#plot the distribution of sequence length 
+plot(sort(unname(rowSums(seqtab.nochim))))
+
+#species richness
+rarecurve(seqtab.nochim)
+
+```
+
+# Export fasta file 
+
+```{r fasta files}
+
+#give our sequence headers more manageable names (ASV_1, ASV_2...) and write out a FASTA of our ASV seqs
+asv_seqs <- colnames(seqtab.nochim)
+asv_headers <- vector(dim(seqtab.nochim)[2], mode = "character")
+for (i in 1:dim(seqtab.nochim)[2]) {
+  asv_headers[i] <- paste(">ASV", i, sep = "_")
+}
+asv_fasta <- c(rbind(asv_headers, asv_seqs))
+
+#export fasta file with all 962 ASVs
+
+write(asv_fasta, "/Users/Katja/Box Sync/PhD Lund Katja/Sequencing/PacBio AMF/Sequencing data AMF/dada2/AMF_DOK trial/PacBio_AMF_workflow/results_dada2/ASVs_processed.fasta")
+
+```
+
+# Export count table
+
+```{r count table}
+
+asv_tab <- (seqtab.nochim)
+colnames(asv_tab) <- sub(">", "", asv_headers)
+
+write.table(asv_tab, "/Users/Katja/Box Sync/PhD Lund Katja/Sequencing/PacBio AMF/Sequencing data AMF/dada2/AMF_DOK trial/PacBio_AMF_workflow/results_dada2/ASVs_counts.csv", sep = ",", quote = FALSE, col.names = NA)
+
+#matrix: rows corresponding to samples, columns with ASV, the value of each entry is the number of times that ASV was observed in the sample
+
+```
+
+# Taxonomy with UNITE 2020
+
+```{r taxonomy unite 2020}
+
+set.seed(NULL) #return to the original state by unsetting the seed
+set.seed(62)
+
+#take UNITE database
+
+taxonomy_unite <- assignTaxonomy(seqtab.nochim, "/Users/Katja/Box Sync/PhD Lund Katja/Sequencing/PacBio AMF/Sequencing data AMF/dada2/AMF_DOK trial/reference databases/sh_general_release_dynamic_04.02.2020_dev.fasta", multithread=TRUE, tryRC = TRUE)
+
+tax_unite2020 <- taxonomy_unite # Removing sequence rownames for display only
+rownames(tax_unite2020) <- NULL
+rownames(tax_unite2020) <- getSequences(asv_tab)
+head(tax_unite2020)
+
+write.csv(tax_unite2020, "/Users/Katja/Box Sync/PhD Lund Katja/Sequencing/PacBio AMF/Sequencing data AMF/dada2/AMF_DOK trial/PacBio_AMF_workflow/results_dada2/tax_unite2020.csv")
+
+write.csv(taxonomy_unite, "/Users/Katja/Box Sync/PhD Lund Katja/Sequencing/PacBio AMF/Sequencing data AMF/dada2/AMF_DOK trial/PacBio_AMF_workflow/results_dada2/tax_unite2020_seq.csv")
+
+```
