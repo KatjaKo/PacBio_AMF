@@ -443,7 +443,7 @@ unite_ASV_rel <- transform_sample_counts(physeq_unite_Filtered_ASV, function(x) 
 + PERMANOVA with Bray-Curtis and UniFrac
 + plot PCoA/NMDS
 
-# GENUS level 
+## GENUS level 
 + agglomerate on genus level 
 + remove samples with less than 500 reads
 + TSS normalization
@@ -901,7 +901,7 @@ geom_segment(data = sig.env_dbrda,
 
 alpha_div <- data.frame(estimate_richness(physeq_unite_Filtered_ASV, split=TRUE, measures = c("Observed", "Shannon")), sample_data(physeq_unite_Filtered_ASV))
 
-View(alpha_div)
+alpha_div
 
 plot_richness(physeq_unite_Filtered_ASV, x="treatment", color="farming_system", measures=c("Observed","Shannon")) + stat_boxplot(geom = "errorbar") + geom_boxplot() + theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), panel.background = element_blank(), axis.line = element_line(colour = "black")) + xlab("Treatment") + ggtitle("AMF alpha diversity") + ylab("Alpha metrics")
 
@@ -921,21 +921,28 @@ data_brms <- alpha_div
 head(data_brms)
 str(data_brms)
 
+
+data_brms$farming_system <- as.factor(data_brms$farming_system)
+data_brms$treatment <- as.factor(data_brms$treatment)
+data_brms$time <- as.factor(data_brms$time)
+
 ```
 
 ## BRMS model for observed richness 
 
 ```{r BRMS for observed richness}
 
-observed_brms <-brm(formula = (Observed)~0+treatment*farming_system*time+(1|block/plot),
+observed_brms <-brm(formula = (Observed)~time*treatment*farming_system+(1|block/plot),
             data = data_brms,
-            family="gaussian",
+            family="negbinomial",
             seed = 1041,
             warmup = 2000,#The number of warmup iterations should 
             #not be larger than iter and the default is iter/2.
             iter = 6000, 
             chains = 5,
-            control = list(adapt_delta = 0.999, max_treedepth = 15))
+            control = list(adapt_delta = 0.999, stepsize=0.09, max_treedepth = 15))
+
+pp_check(observed_brms)
 
 # Save an object to a file
 saveRDS(observed_brms, "data/rds/observed_brms.rds")
@@ -963,14 +970,8 @@ marginal_effects(observed_brms)
 
 ```{r plot brms for observed richness}
 
-#we can plot the summary of the posterior distribution.
-#make a data frame that contains the parameters of interest
-#here: all of them
-
-data_brms$farming_system <- as.factor(data_brms$farming_system)
-data_brms$treatment <- as.factor(data_brms$treatment)
-
 newdat <- expand.grid(
+  time = factor(c("4w", "13w"),levels=levels(data_brms$time)), 
   farming_system = factor(c("BIODYN", "CONMIN"), levels=levels(data_brms$farming_system)),
   treatment = factor(c("C","R", "RC"),levels=levels(data_brms$treatment)))
 head(newdat)
@@ -988,10 +989,11 @@ fitdf_observed_plot
 
 #prepare and extract results table
 fitdf_observed<-fitdf_observed_plot[, c("farming_system","treatment","Estimate","Q2.5","Q97.5")]
-write.table(fitdf_observed,"/Users/Katja/Box Sync/PhD Lund Katja/Sequencing/PacBio AMF/Sequencing data AMF/dada2/AMF_DOK trial/PacBio_AMF_workflow/results/observed_alphadiv_brms.txt",sep="\t",quote=F)
+write.table(fitdf_observed,"results/observed_brms.txt",sep="\t",quote=F)
 
 #change order of treatment in fitted values
 fitdf_observed_plot$treatment<-factor(fitdf_observed_plot$treatment, levels=c("R", "RC", "C"))
+data_brms$treatment<-factor(data_brms$treatment, levels=c("R", "RC", "C"))
 
 #this is the dataframe i will use for plotting
 pos.dodge <- position_dodge(0.7) # move them .7 to the left and right
@@ -1013,11 +1015,16 @@ fitted_observed<-ggplot(data = fitdf_observed_plot,
                                  "tomato2"), name  ="") +
   scale_shape_manual(values = c(15, 17, 19),name  ="")+
   xlab("Farming system")+
+  facet_grid(~time)+ 
   ylab("Observed ASV")+theme_bw()
 
 print(fitted_observed)
 ggsave("results/observed_brms.tiff", width = 18, height = 10, units = "cm")
 
+```
+
+
+```{r}
 #get location of the means including credible intervals from here:
 fitdf_observed_plot<-as.data.frame(fitdf_observed_plot)
 
@@ -1031,25 +1038,40 @@ fit_observed = as.data.frame(fitted(observed_brms, newdata=newdat,
 #this is the whole posterior, not summarized as before
 
 #add names
-colnames<-as.character(interaction(newdat$farming_system, newdat$treatment))
+colnames<-as.character(interaction(newdat$farming_system, newdat$treatment, newdat$time))
 
 colnames(fit_observed)<-colnames
 names(fit_observed)
 
-#calculate the mean differences between systems across the roofs
-BIODYN_brms_obs<-(fit_observed$BIODYN.C+fit_observed$BIODYN.RC+fit_observed$BIODYN.R)/3
-mean(BIODYN_brms_obs)
-sd(BIODYN_brms_obs)
-CONMIN_brms_obs<-(fit_observed$CONMIN.C+fit_observed$CONMIN.RC+fit_observed$CONMIN.R)/3
-mean(CONMIN_brms_obs)
-sd(CONMIN_brms_obs)
+#calculate the mean differences between systems across the roofs for 4w
+BIODYN_brms_obs_T1<-(fit_observed$BIODYN.C.4w+fit_observed$BIODYN.RC.4w+fit_observed$BIODYN.R.4w)/3
+mean(BIODYN_brms_obs_T1)
+sd(BIODYN_brms_obs_T1)
+CONMIN_brms_obs_T1<-(fit_observed$CONMIN.C.4w+fit_observed$CONMIN.RC.4w+fit_observed$CONMIN.R.4w)/3
+mean(CONMIN_brms_obs_T1)
+sd(CONMIN_brms_obs_T1)
 
-diff_brms_obs<-(BIODYN_brms_obs-CONMIN_brms_obs)
+diff_brms_obs_T1<-(BIODYN_brms_obs_T1-CONMIN_brms_obs_T1)
 
 #use the quantile function to get mean of that differences with CrI
-round(quantile(diff_brms_obs, probs=c(0.025, 0.5, 0.975)),2)
+round(quantile(diff_brms_obs_T1, probs=c(0.025, 0.5, 0.975)),2)
 #this is a result
-mean(diff_brms_obs)
+mean(diff_brms_obs_T1)
+
+#calculate the mean differences between systems across the roofs for 13w
+BIODYN_brms_obs_T3<-(fit_observed$BIODYN.C.13w+fit_observed$BIODYN.RC.13w+fit_observed$BIODYN.R.13w)/3
+mean(BIODYN_brms_obs_T3)
+sd(BIODYN_brms_obs_T3)
+CONMIN_brms_obs_T3<-(fit_observed$CONMIN.C.13w+fit_observed$CONMIN.RC.13w+fit_observed$CONMIN.R.13w)/3
+mean(CONMIN_brms_obs_T3)
+sd(CONMIN_brms_obs_T3)
+
+diff_brms_obs_T3<-(BIODYN_brms_obs_T3-CONMIN_brms_obs_T3)
+
+#use the quantile function to get mean of that differences with CrI
+round(quantile(diff_brms_obs_T3, probs=c(0.025, 0.5, 0.975)),2)
+#this is a clear result, it includes zero so its likely that there is no difference
+mean(diff_brms_obs_T3)
 
 ```
 
@@ -1057,7 +1079,7 @@ mean(diff_brms_obs)
 
 ```{r BRMS for observed ASVs richness}
 
-shannon_brms <-brm(formula = (Shannon)~0+treatment*farming_system*time+(1|block/plot),
+shannon_brms <-brm(formula = (Shannon)~time*treatment*farming_system+(1|block/plot),
             data = data_brms,
             family="gaussian",
             seed = 1041,
@@ -1066,6 +1088,8 @@ shannon_brms <-brm(formula = (Shannon)~0+treatment*farming_system*time+(1|block/
             iter = 6000, 
             chains = 5,
             control = list(adapt_delta = 0.999, max_treedepth = 15))
+
+pp_check(shannon_brms)
 
 # Save an object to a file
 saveRDS(shannon_brms, "data/rds/shannon_brms.rds")
@@ -1106,13 +1130,10 @@ fitdf_shannon_plot
 
 #prepare and extract results table
 fitdf_shannon<-fitdf_shannon_plot[, c("farming_system","treatment","Estimate","Q2.5","Q97.5")]
-write.table(fitdf_shannon,"/Users/Katja/Box Sync/PhD Lund Katja/Sequencing/PacBio AMF/Sequencing data AMF/dada2/AMF_DOK trial/PacBio_AMF_workflow/results/shannon_alphadiv_brms.txt",sep="\t",quote=F)
+write.table(fitdf_shannon,"results/shannon_brms.txt",sep="\t",quote=F)
 
 #change order of treatment in fitted values
 fitdf_shannon_plot$treatment<-factor(fitdf_shannon_plot$treatment, levels=c("R", "RC", "C"))
-
-#this is the dataframe i will use for plotting
-pos.dodge <- position_dodge(0.7) # move them .7 to the left and right
 
 #make the final plot
 fitted_shannon<-ggplot(data = fitdf_shannon_plot, 
@@ -1131,10 +1152,15 @@ fitted_shannon<-ggplot(data = fitdf_shannon_plot,
                                  "tomato2"), name  ="") +
   scale_shape_manual(values = c(15, 17, 19),name  ="")+
   xlab("Farming system")+
+  facet_grid(~time) + 
   ylab("Shannon diversity index")+theme_bw()
 
 print(fitted_shannon)
 ggsave("results/shannon_brms.tiff", width = 18, height = 10, units = "cm")
+
+```
+
+```{r}
 
 #get location of the means including credible intervals from here:
 fitdf_shannon_plot<-as.data.frame(fitdf_shannon_plot)
@@ -1149,25 +1175,41 @@ fit_shannon = as.data.frame(fitted(shannon_brms, newdata=newdat,
 #this is the whole posterior, not summarized as before
 
 #add names
-colnames<-as.character(interaction(newdat$farming_system, newdat$treatment))
+colnames<-as.character(interaction(newdat$farming_system, newdat$treatment, newdat$time))
 
 colnames(fit_shannon)<-colnames
 names(fit_shannon)
 
-#calculate the mean differences between systems across the roofs
-BIODYN_brms_shannon<-(fit_shannon$BIODYN.C+fit_shannon$BIODYN.RC+fit_shannon$BIODYN.R)/3
-mean(BIODYN_brms_shannon)
-sd(BIODYN_brms_shannon)
-CONMIN_brms_shannon<-(fit_shannon$CONMIN.C+fit_shannon$CONMIN.RC+fit_shannon$CONMIN.R)/3
-mean(CONMIN_brms_shannon)
-sd(CONMIN_brms_shannon)
+#calculate the mean differences between systems across the roofs at 4w
+BIODYN_brms_shannon_T1<-(fit_shannon$BIODYN.C.4w+fit_shannon$BIODYN.RC.4w+fit_shannon$BIODYN.R.4w)/3
+mean(BIODYN_brms_shannon_T1)
+sd(BIODYN_brms_shannon_T1)
+CONMIN_brms_shannon_T1<-(fit_shannon$CONMIN.C.4w+fit_shannon$CONMIN.RC.4w+fit_shannon$CONMIN.R.4w)/3
+mean(CONMIN_brms_shannon_T1)
+sd(CONMIN_brms_shannon_T1)
 
-diff_brms_shannon <- (BIODYN_brms_shannon-CONMIN_brms_shannon)
+diff_brms_shannon_T1 <- (BIODYN_brms_shannon_T1-CONMIN_brms_shannon_T1)
 
 #use the quantile function to get mean of that differences with CrI
-round(quantile(diff_brms_shannon, probs=c(0.025, 0.5, 0.975)),2)
+round(quantile(diff_brms_shannon_T1, probs=c(0.025, 0.5, 0.975)),2)
 #this is a result
-mean(diff_brms_shannon)
+mean(diff_brms_shannon_T1)
+
+
+#calculate the mean differences between systems across the roofs at 13w
+BIODYN_brms_shannon_T3<-(fit_shannon$BIODYN.C.13w+fit_shannon$BIODYN.RC.13w+fit_shannon$BIODYN.R.13w)/3
+mean(BIODYN_brms_shannon_T3)
+sd(BIODYN_brms_shannon_T3)
+CONMIN_brms_shannon_T3<-(fit_shannon$CONMIN.C.13w+fit_shannon$CONMIN.RC.13w+fit_shannon$CONMIN.R.13w)/3
+mean(CONMIN_brms_shannon_T3)
+sd(CONMIN_brms_shannon_T3)
+
+diff_brms_shannon_T3 <- (BIODYN_brms_shannon_T3-CONMIN_brms_shannon_T3)
+
+#use the quantile function to get mean of that differences with CrI
+round(quantile(diff_brms_shannon_T3, probs=c(0.025, 0.5, 0.975)),2)
+#this is a result
+mean(diff_brms_shannon_T3)
 
 ```
 
@@ -1401,6 +1443,9 @@ ggplot(data_genera) + geom_col(mapping = aes(x = treatment:farming_system, y = A
 
 #treatment 
 ggplot(data_genera) + geom_col(mapping = aes(x = treatment, y = Abundance, fill = Genus), position = "fill", show.legend = TRUE) + theme(axis.text.x = element_text(angle = 35, hjust = 1)) + scale_x_discrete(name ="Treatment") + scale_fill_discrete(name="AMF genera", breaks=c("g__Acaulospora", "g__Ambispora", "g__Archaeospora", "g__Claroideoglomus", "g__Diversispora", "g__Dominikia", "g__Funneliformis", "g__Gigaspora", "g__Glomus", "g__Palaeospora", "g__Paraglomus", "g__Septoglomus"), labels=c("Acaulospora", "Ambispora", "Archaeospora", "Claroideoglomus", "Diversispora", "Dominikia", "Funneliformis", "Gigaspora", "Glomus", "Palaeospora", "Paraglomus", "Septoglomus")) + facet_wrap(~time) + ylab("Proportion")
+
+#farming system
+ggplot(data_genera) + geom_col(mapping = aes(x = farming_system, y = Abundance, fill = Genus), position = "fill", show.legend = TRUE) + theme(axis.text.x = element_text(angle = 35, hjust = 1)) + scale_x_discrete(name ="Farming system") + scale_fill_discrete(name="AMF genera", breaks=c("g__Acaulospora", "g__Ambispora", "g__Archaeospora", "g__Claroideoglomus", "g__Diversispora", "g__Dominikia", "g__Funneliformis", "g__Gigaspora", "g__Glomus", "g__Palaeospora", "g__Paraglomus", "g__Septoglomus"), labels=c("Acaulospora", "Ambispora", "Archaeospora", "Claroideoglomus", "Diversispora", "Dominikia", "Funneliformis", "Gigaspora", "Glomus", "Palaeospora", "Paraglomus", "Septoglomus")) + facet_wrap(~time) + ylab("Proportion")
 
 #with NA as others
 
