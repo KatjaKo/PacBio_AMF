@@ -294,7 +294,7 @@ physeq_unite
 #meta_file; 48 samples, 24 variables 
 
 #phyloseq with relative abundance
-physeq_unite_rel = phyloseq(OTUr, tax_unite, meta_file)
+physeq_unite_rel = phyloseq(OTUr, TAX, meta_file)
 
 sort(sample_sums(physeq_unite), decreasing = F) 
 sum(otu_table(physeq_unite)) #185825 sequencing reads in all samples
@@ -681,13 +681,13 @@ write.table(uni_genus_results, "results/unweighted_Unifrac.txt", sep="\t",quote=
 
 ```{r multivariate dispersion}
 
-modSystem <- with(veganSample_AMF_genus,  betadisper(bray_genus, farming_system))
+modSystem <- with(veganSample_AMF_genus,  betadisper(bray_unite_genus, farming_system))
 modSystem
 
-modDrought <- with(veganSample_AMF_genus,  betadisper(bray_genus, treatment))
+modDrought <- with(veganSample_AMF_genus,  betadisper(bray_unite_genus, treatment))
 modDrought
 
-modTime <- with(veganSample_AMF_genus,  betadisper(bray_genus, time))
+modTime <- with(veganSample_AMF_genus,  betadisper(bray_unite_genus, time))
 modTime
 
 set.seed(1089)
@@ -987,13 +987,13 @@ fit_observed
 fitdf_observed_plot = cbind(newdat, fit_observed)
 fitdf_observed_plot
 
-#prepare and extract results table
-fitdf_observed<-fitdf_observed_plot[, c("farming_system","treatment","Estimate","Q2.5","Q97.5")]
-write.table(fitdf_observed,"results/observed_brms.txt",sep="\t",quote=F)
-
 #change order of treatment in fitted values
 fitdf_observed_plot$treatment<-factor(fitdf_observed_plot$treatment, levels=c("R", "RC", "C"))
 data_brms$treatment<-factor(data_brms$treatment, levels=c("R", "RC", "C"))
+
+#prepare and extract results table
+fitdf_observed<-fitdf_observed_plot[, c("farming_system","treatment", "time", "Estimate","Q2.5","Q97.5")]
+write.table(fitdf_observed,"results/observed_brms.txt",sep="\t",quote=F)
 
 #this is the dataframe i will use for plotting
 pos.dodge <- position_dodge(0.7) # move them .7 to the left and right
@@ -1128,12 +1128,12 @@ fit_shannon
 fitdf_shannon_plot = cbind(newdat, fit_shannon)
 fitdf_shannon_plot
 
-#prepare and extract results table
-fitdf_shannon<-fitdf_shannon_plot[, c("farming_system","treatment","Estimate","Q2.5","Q97.5")]
-write.table(fitdf_shannon,"results/shannon_brms.txt",sep="\t",quote=F)
-
 #change order of treatment in fitted values
 fitdf_shannon_plot$treatment<-factor(fitdf_shannon_plot$treatment, levels=c("R", "RC", "C"))
+
+#prepare and extract results table
+fitdf_shannon<-fitdf_shannon_plot[, c("farming_system","treatment", "time", "Estimate","Q2.5","Q97.5")]
+write.table(fitdf_shannon,"results/shannon_brms.txt",sep="\t",quote=F)
 
 #make the final plot
 fitted_shannon<-ggplot(data = fitdf_shannon_plot, 
@@ -1210,6 +1210,133 @@ diff_brms_shannon_T3 <- (BIODYN_brms_shannon_T3-CONMIN_brms_shannon_T3)
 round(quantile(diff_brms_shannon_T3, probs=c(0.025, 0.5, 0.975)),2)
 #this is a result
 mean(diff_brms_shannon_T3)
+
+```
+
+# Shannon index on genus level 
+
+```{r}
+
+plot_richness(physeq_AMF_genus_500, x="farming_system", measures=c("Shannon")) + theme_bw()
+
+plot_richness(physeq_AMF_genus_500, x="treatment", color="farming_system", measures=c("Observed","Shannon")) + stat_boxplot(geom = "errorbar") + geom_boxplot() + theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), panel.background = element_blank(), axis.line = element_line(colour = "black")) + xlab("Treatment") + ggtitle("AMF alpha diversity") + ylab("Alpha metrics")
+
+shannon_div <- data.frame(estimate_richness(physeq_AMF_genus_500, split=TRUE, measures = c("Observed", "Shannon")), sample_data(physeq_AMF_genus_500))
+shannon_div
+
+write.csv(shannon_div, "results/shannon_div.csv")
+
+brms_shannon <- shannon_div
+head(brms_shannon)
+str(brms_shannon)
+
+shannon_brms_genus <-brm(formula = (Shannon)~time*treatment*farming_system+(1|block/plot),
+            data = brms_shannon,
+            family="gaussian",
+            seed = 1041,
+            warmup = 2000,#The number of warmup iterations should 
+            #not be larger than iter and the default is iter/2.
+            iter = 6000, 
+            chains = 5,
+            control = list(adapt_delta = 0.999, max_treedepth = 15))
+
+pp_check(shannon_brms_genus)
+
+# Save an object to a file
+saveRDS(shannon_brms_genus, "data/rds/shannon_brms_genus.rds")
+
+#reload it so you don't have to run it again
+shannon_brms_genus <- readRDS("data/rds/shannon_brms_genus.rds")
+
+#check model fit 
+yfit_shannon_genus <- brms_shannon$Shannon
+yrep_shannon_genus <- posterior_predict(shannon_brms_genus, draws = length(yfit_shannon_genus))
+
+launch_shinystan(shannon_brms_genus)
+
+#explore results
+summary(shannon_brms_genus)
+
+#marginal effects
+marginal_effects(shannon_brms_genus)
+
+newdat_genus <- expand.grid(
+  time = factor(c("4w", "13w"),levels=levels(brms_shannon$time)),
+  farming_system = factor(c("BIODYN", "CONMIN"), levels=levels(brms_shannon$farming_system)),
+  treatment = factor(c("C","R", "RC"),levels=levels(brms_shannon$treatment)))
+head(newdat_genus)
+
+
+fit_shannon_genus = fitted(shannon_brms_genus, newdata = newdat_genus
+                           , robust=T, re_formula = NA,summary = TRUE,probs = c(0.025, 0.975))
+fit_shannon_genus
+
+# no colnames, I add them manually
+fitdf_shannon_plot_genus = cbind(newdat_genus, fit_shannon_genus)
+fitdf_shannon_plot_genus
+
+#change order of treatment in fitted values
+fitdf_shannon_plot_genus$treatment<-factor(fitdf_shannon_plot_genus$treatment, levels=c("R", "RC", "C"))
+
+#prepare and extract results table
+fitdf_shannon_genus<-fitdf_shannon_plot_genus[, c("farming_system","treatment", "time", "Estimate","Q2.5","Q97.5")]
+write.table(fitdf_shannon_genus,"results/shannon_brms_genus.txt",sep="\t",quote=F)
+
+#make the final plot
+fitted_shannon_genus<-ggplot(data = fitdf_shannon_plot_genus, 
+                     aes(x = farming_system,
+                         y =Estimate,
+                         color = treatment,
+                         shape=treatment)) +
+  geom_point(size=6,position=pos.dodge) +
+  geom_errorbar(aes(ymin=Q2.5,
+                    ymax=Q97.5),
+                width=0,
+                position=pos.dodge,
+                size=1.2, show.legend = F) +
+  scale_color_manual(values =  c("palegreen4",
+                                 "steelblue2",
+                                 "tomato2"), name  ="") +
+  scale_shape_manual(values = c(15, 17, 19),name  ="")+
+  xlab("Farming system")+
+  facet_grid(~time) + 
+  ylab("Shannon diversity index")+theme_bw()
+
+print(fitted_shannon_genus)
+ggsave("results/shannon_brms_genus.tiff", width = 18, height = 10, units = "cm")
+
+fitdf_shannon_plot_genus<-as.data.frame(fitdf_shannon_plot_genus)
+
+#if you want, you can also calculate differences between treatments based on the posterior
+##calucate differences with CrI, you need the whole posterior
+#the whole posterior distribution for me. I save it as dataframe (fit1)
+
+fit_shannon_genus = as.data.frame(fitted(shannon_brms_genus, newdata=newdat_genus,
+                           re_formula = NA, summary = FALSE))
+
+#this is the whole posterior, not summarized as before
+
+#add names
+colnames_genus<-as.character(interaction(newdat_genus$farming_system, newdat_genus$treatment, newdat_genus$time))
+
+colnames(fit_shannon_genus)<-colnames_genus
+names(fit_shannon_genus)
+
+#calculate the mean differences between systems across the roofs at 4w
+BIODYN_brms_shannon_genusT1<-(fit_shannon_genus$BIODYN.C.4w+fit_shannon_genus$BIODYN.RC.4w+fit_shannon_genus$BIODYN.R.4w)/3
+mean(BIODYN_brms_shannon_genusT1)
+sd(BIODYN_brms_shannon_genusT1)
+CONMIN_brms_shannon_genusT1<-(fit_shannon_genus$CONMIN.C.4w+fit_shannon_genus$CONMIN.RC.4w+fit_shannon_genus$CONMIN.R.4w)/3
+mean(CONMIN_brms_shannon_genusT1)
+sd(CONMIN_brms_shannon_genusT1)
+
+diff_brms_shannon_genusT1 <- (BIODYN_brms_shannon_genusT1-CONMIN_brms_shannon_genusT1)
+
+#use the quantile function to get mean of that differences with CrI
+round(quantile(diff_brms_shannon_genusT1, probs=c(0.025, 0.5, 0.975)),2)
+#this is a result
+mean(diff_brms_shannon_genusT1)
+
 
 ```
 
