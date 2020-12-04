@@ -1,30 +1,34 @@
+---
+  title: "script_bayesian_stats"
+author: "Katja Kozjek"
+---
 
+# Load libraries
 
+library(phyloseq); packageVersion("phyloseq") 
+library(vegan); packageVersion("vegan") 
+library(ggplot2); packageVersion("ggplot2")
+library(dplyr); packageVersion("dplyr")
+library(tidyverse); packageVersion("tidyverse")
+library(ggpubr); packageVersion("ggpubr")
+library(devtools); packageVersion("devtools")
+library(ape); packageVersion("ape")
+library(brms); packageVersion("brms") 
+library(shinystan); packageVersion("shinystan") 
+library(picante); packageVersion("picante")
+library(ggvegan); packageVersion("ggvegan")
+library(wesanderson); packageVersion("wesanderson")
+  
 # ALPHA diversity indices
 
-```{r alpha_div, echo=F}
-
-#the alpha diversity metrics were calculated based on samples rarefied to the lowest number of reads, calcualted per sample
-#alpha diversity estimates on rarefied data
 #we calculate Observed and Shannon for each sample
 
 alpha_div <- data.frame(estimate_richness(physeq_unite_Filtered_ASV, split=TRUE, measures = c("Observed", "Shannon")), sample_data(physeq_unite_Filtered_ASV))
-
-alpha_div
-
 plot_richness(physeq_unite_Filtered_ASV, x="treatment", color="farming_system", measures=c("Observed","Shannon")) + stat_boxplot(geom = "errorbar") + geom_boxplot() + theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), panel.background = element_blank(), axis.line = element_line(colour = "black")) + xlab("Treatment") + ggtitle("AMF alpha diversity") + ylab("Alpha metrics")
 
 write.csv(alpha_div, "results/alpha_div.csv")
 
-```
-**Observed ASV richness and Shannon diversity index are calculated.**
-  
-  ## prepare data for BRMS model
-  
-  ```{r prepare data for BRMS model, echo=F}
-
-#import data
-head(alpha_div)
+## Prepare data for BRMS model
 
 data_brms <- alpha_div
 head(data_brms)
@@ -34,11 +38,7 @@ data_brms$farming_system <- as.factor(data_brms$farming_system)
 data_brms$treatment <- as.factor(data_brms$treatment)
 data_brms$time <- as.factor(data_brms$time)
 
-```
-
-+ negbinominal and gaussian BRMS model for observed richness 
-
-```{r BRMS for observed richness, echo=F}
+# Negbinominal distribution for Observed
 
 observed_brms <-brm(formula = (Observed)~time*treatment*farming_system+(1|block/plot),
                     data = data_brms,
@@ -52,7 +52,7 @@ observed_brms <-brm(formula = (Observed)~time*treatment*farming_system+(1|block/
 
 pp_check(observed_brms)
 
-# Save an object to a file
+#save an object to a file
 saveRDS(observed_brms, "data/rds/observed_brms.rds")
 
 #reload it so you don't have to run it again
@@ -71,13 +71,7 @@ bayes_R2(observed_brms)
 #marginal effects
 marginal_effects(observed_brms)
 
-```
-**BRMS model for Observed richness is created.**
-  
-  ## plot BRMS observed richness
-  
-  ```{r plot brms for observed richness, echo=F}
-
+## plot BRMS observed 
 newdat <- expand.grid(
   time = factor(c("4w", "13w"),levels=levels(data_brms$time)), 
   farming_system = factor(c("BIODYN", "CONMIN"), levels=levels(data_brms$farming_system)),
@@ -101,10 +95,6 @@ data_brms$treatment<-factor(data_brms$treatment, levels=c("R", "RC", "C"))
 
 #prepare and extract results table
 fitdf_observed<-fitdf_observed_plot[, c("farming_system","treatment", "time", "Estimate","Q2.5","Q97.5")]
-write.table(fitdf_observed,"results/observed_brms.txt",sep="\t",quote=F)
-
-#this is the dataframe i will use for plotting
-pos.dodge <- position_dodge(0.7) # move them .7 to the left and right
 
 #make the final plot, without raw data
 fitted_observed<-ggplot(data = fitdf_observed_plot, 
@@ -125,14 +115,7 @@ fitted_observed<-ggplot(data = fitdf_observed_plot,
   ylab("Observed ASV")+theme_bw()
 
 print(fitted_observed)
-ggsave("results/observed_brms.tiff", width = 18, height = 10, units = "cm")
-ggsave("results/observed_brms.jpeg", width = 18, height = 10, units = "cm")
-ggsave("results/observed_brms.pdf", width = 18, height = 10, units = "cm")
 
-```
-
-
-```{r, echo=F}
 #get location of the means including credible intervals from here:
 fitdf_observed_plot<-as.data.frame(fitdf_observed_plot)
 
@@ -181,11 +164,7 @@ round(quantile(diff_brms_obs_T3, probs=c(0.025, 0.5, 0.975)),2)
 #this is a clear result, it includes zero so its likely that there is no difference
 mean(diff_brms_obs_T3)
 
-```
-
-## BRMS model for Shannon index 
-
-```{r BRMS for Shannon, echo=F}
+# BRMS model for Shannon index 
 
 shannon_brms <-brm(formula = (Shannon)~time*treatment*farming_system+(1|block/plot),
                    data = data_brms,
@@ -199,7 +178,7 @@ shannon_brms <-brm(formula = (Shannon)~time*treatment*farming_system+(1|block/pl
 
 pp_check(shannon_brms)
 
-# Save an object to a file
+#save an object to a file
 saveRDS(shannon_brms, "data/rds/shannon_brms.rds")
 
 #reload it so you don't have to run it again
@@ -217,17 +196,7 @@ summary(shannon_brms)
 #marginal effects
 marginal_effects(shannon_brms)
 
-```
-**BRMS model for Shannon index is created.**
-  
-  ## plot brms for Shannon index
-  
-  ```{r plot brms for Shannon, echo=F}
-
-#use the function "fitted" from brms
-#to get fitted means of the posterior for treatments
-#It summarizes from the posterior and calculates meadian with 95% credible interval
-#= we are 95% sure that the real estimate is within this interval
+## plot brms for Shannon index
 
 fit_shannon = fitted(shannon_brms, newdata = newdat, robust=T, re_formula = NA,summary = TRUE,probs = c(0.025, 0.975))
 fit_shannon
@@ -241,7 +210,6 @@ fitdf_shannon_plot$treatment<-factor(fitdf_shannon_plot$treatment, levels=c("R",
 
 #prepare and extract results table
 fitdf_shannon<-fitdf_shannon_plot[, c("farming_system","treatment", "time", "Estimate","Q2.5","Q97.5")]
-write.table(fitdf_shannon,"results/shannon_brms.txt",sep="\t",quote=F)
 
 #make the final plot
 fitted_shannon<-ggplot(data = fitdf_shannon_plot, 
@@ -262,25 +230,13 @@ fitted_shannon<-ggplot(data = fitdf_shannon_plot,
   ylab("Shannon diversity index")+theme_bw()
 
 print(fitted_shannon)
-ggsave("results/shannon_brms.tiff", width = 18, height = 10, units = "cm")
-ggsave("results/shannon_brms.jpeg", width = 18, height = 10, units = "cm")
-ggsave("results/shannon_brms.pdf", width = 18, height = 10, units = "cm")
-
-```
-
-```{r, echo=F}
 
 #get location of the means including credible intervals from here:
 fitdf_shannon_plot<-as.data.frame(fitdf_shannon_plot)
 
-#if you want, you can also calculate differences between treatments based on the posterior
-##calucate differences with CrI, you need the whole posterior
-#the whole posterior distribution for me. I save it as dataframe (fit1)
-
+#this is the whole posterior, not summarized as before
 fit_shannon = as.data.frame(fitted(shannon_brms, newdata=newdat,
                                    re_formula = NA, summary = FALSE))
-
-#this is the whole posterior, not summarized as before
 
 #add names
 colnames<-as.character(interaction(newdat$farming_system, newdat$treatment, newdat$time))
@@ -319,9 +275,8 @@ round(quantile(diff_brms_shannon_T3, probs=c(0.025, 0.5, 0.975)),2)
 #this is a result
 mean(diff_brms_shannon_T3)
 
-# add figure for water
 
-```{r water content}
+# add figure for water
 
 View(water_content)
 
@@ -341,9 +296,8 @@ water_summary <- data_summary(water_content, varname="water",
                               groupnames=c("treatment", "farming_system", "time"))
 
 water_summary$farming_system <- as.factor(water_summary$farming_system)
-
 water_summary$time <- as.factor(water_summary$time)
-#plot 4w before 123w
+#plot 4w before 13w
 water_summary$time_order <- factor(water_summary$time, levels=c("4w", "13w"), labels = c("4 weeks", "13 weeks"))
 
 water_summary$treatment<-factor(water_summary$treatment, levels=c("R", "RC", "C"))
@@ -353,18 +307,13 @@ p_water <- ggplot(water_summary, aes(farming_system, water)) +
     aes(ymin = water-sd, ymax = water+sd, color = treatment),
     position = position_dodge(0.3), width = 0.2
   ) +
-  geom_point(aes(color = treatment), position = position_dodge(0.3), size=2) +     facet_grid(.~time_order) + theme_bw() + xlab("Farming system") + ylab("WC / WHC") + scale_color_manual(values = c("#B6854D", "#8D8680", "#0F0D0E")) + labs(color = "Drought treatment")
+  geom_point(aes(color = treatment), position = position_dodge(0.3), size=2) +
+  facet_grid(.~time_order) + theme_bw() + xlab("Farming system") + ylab("WC / WHC") + 
+  scale_color_manual(values = c("#B6854D", "#8D8680", "#0F0D0E")) + labs(color = "Drought treatment")
 
 p_water
-ggsave("results/water.tiff", width = 20, height = 10, units = "cm", dpi=500)
-ggsave("results/water.jpeg", width = 20, height = 10, units = "cm", dpi=500)
-ggsave("results/water.pdf", width = 20, height = 10, units = "cm", dpi=500)
-
-```
 
 # BRMS model for water
-
-```{r brms model for water}
 
 brms_water <- brm(formula = (water)~time*treatment*farming_system+(1|block/plot),
                   data = water_content,
@@ -378,7 +327,7 @@ brms_water <- brm(formula = (water)~time*treatment*farming_system+(1|block/plot)
 
 pp_check(brms_water)
 
-# Save an object to a file
+#save an object to a file
 saveRDS(brms_water, "data/rds/brms_water.rds")
 
 #reload it so you don't have to run it again
@@ -396,21 +345,13 @@ summary(brms_water)
 #marginal effects
 marginal_effects(brms_water)
 
-```
-
 ## plot BRMS water
-
-```{r plot brms for water, echo=F}
 
 newdat_water <- expand.grid(
   time = factor(c("4w", "13w"),levels=levels(water_summary$time)), 
   farming_system = factor(c("BIODYN", "CONMIN"), levels=levels(water_summary$farming_system)),
   treatment = factor(c("C","R","RC"),levels=levels(water_summary$treatment)))
 head(newdat_water)
-
-#use the function "fitted" from brms to get fitted means of the posterior for treatments
-#It summarizes from the posterior and calculates meadian with 95% credible interval
-#= we are 95% sure that the real estimate is within this interval
 
 fit_water = fitted(brms_water, newdata = newdat_water, robust=T, re_formula = NA,summary = TRUE, probs = c(0.025, 0.975))  
 fit_water
@@ -425,15 +366,11 @@ water_summary$treatment<-factor(water_summary$treatment, levels=c("R", "RC", "C"
 
 #prepare and extract results table
 fitdf_water<-fitdf_water_plot[, c("farming_system","treatment", "time", "Estimate","Q2.5","Q97.5")]
-write.table(fitdf_water,"results/water_brms.txt",sep="\t",quote=F)
-
-#this is the dataframe i will use for plotting
-pos.dodge <- position_dodge(0.7) # move them .7 to the left and right
 
 #make the final plot, without raw data
 fitted_water<-ggplot(data = fitdf_water_plot, 
                      aes(x = farming_system,
-                         y =Estimate,
+                         y = Estimate,
                          color = treatment,
                          shape=treatment)) +
   geom_point(size=6,position=pos.dodge) +
@@ -448,22 +385,14 @@ fitted_water<-ggplot(data = fitdf_water_plot,
   facet_grid(~time)+ 
   ylab("Observed ASV")+theme_bw()
 
-```
-
 ## BRMS summary water
 
-```{r, echo=F}
 #get location of the means including credible intervals from here:
 fitdf_water_plot<-as.data.frame(fitdf_water_plot)
 
-#if you want, you can also calculate differences between treatments based on the posterior
-##calucate differences with CrI, you need the whole posterior
-#the whole posterior distribution for me. I save it as dataframe (fit1)
-
+#this is the whole posterior, not summarized as before
 fit_water = as.data.frame(fitted(brms_water, newdata=newdat_water,
                                  re_formula = NA, summary = FALSE))
-
-#this is the whole posterior, not summarized as before
 
 #add names
 colnames<-as.character(interaction(newdat_water$farming_system, newdat_water$treatment, newdat_water$time))
@@ -500,5 +429,3 @@ diff_brms_water_T3<-(BIODYN_brms_water_T3-CONMIN_brms_water_T3)
 round(quantile(diff_brms_water_T3, probs=c(0.025, 0.5, 0.975)),2)
 #this is a clear result, it includes zero so its likely that there is no difference
 mean(diff_brms_water_T3)
-
-```
