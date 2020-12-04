@@ -2,9 +2,9 @@
 A workflow for processing CCS reads of AMF to ASVs using DADA2
 
 
-#### scripts
+#### - scripts
 This folder contains scripts related to bioinformatic analyses with DADA2
-#### data
+#### - data
 This folder contains data generated through bioinformatics and statistics; fasta, rds and csv files
-#### results
+#### - results
 This folder contains results 
