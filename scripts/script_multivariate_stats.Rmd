@@ -330,8 +330,7 @@ perm.genus <- adonis2(bray_unite_genus ~ treatment+time+farming_system+
 perm.genus
 ```
   
-#Multivariate dispersion 
-+ As PERMANOVA is sensitive to unequal multivariate dispersion, multivariate group means were tested 
+# Multivariate dispersion 
 
 ```{r multivariate dispersion, echo=F}
 
