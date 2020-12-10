@@ -164,6 +164,50 @@ round(quantile(diff_brms_obs_T3, probs=c(0.025, 0.5, 0.975)),2)
 #this is a clear result, it includes zero so its likely that there is no difference
 mean(diff_brms_obs_T3)
 
+# Comparisons for Observed ASV
+
+#calculate treatment effects
+fitTest_observed<-fitted(observed_brms,
+                         newdata = newdat,
+                         summary = F,
+                         re_formula = NA)
+
+fitTest_observed<-as.data.frame(fitTest_observed)
+colnames(fitTest_observed) <- interaction(newdat$time, newdat$farming_system, newdat$treatment)
+
+contrastObserved<-cbind(
+  BD.RRC.4w<-fitTest_observed$`4w.BIODYN.R`-fitTest_observed$`4w.BIODYN.RC`,
+  BD.RC.4w<-fitTest_observed$`4w.BIODYN.R`-fitTest_observed$`4w.BIODYN.C`,
+  BD.RCC.4w<-fitTest_observed$`4w.BIODYN.RC`-fitTest_observed$`4w.BIODYN.C`,
+  CM.RRC.4w<-fitTest_observed$`4w.CONMIN.R`-fitTest_observed$`4w.CONMIN.RC`,
+  CM.RC.4w<-fitTest_observed$`4w.CONMIN.R`-fitTest_observed$`4w.CONMIN.C`,
+  CM.RCC.4w<-fitTest_observed$`4w.CONMIN.RC`-fitTest_observed$`4w.CONMIN.C`,
+  BD.RRC.13w<-fitTest_observed$`13w.BIODYN.R`-fitTest_observed$`13w.BIODYN.RC`,
+  BD.RC.13w<-fitTest_observed$`13w.BIODYN.R`-fitTest_observed$`13w.BIODYN.C`,
+  BD.RCC.13w<-fitTest_observed$`13w.BIODYN.RC`-fitTest_observed$`13w.BIODYN.C`,
+  CM.RRC.13w<-fitTest_observed$`13w.CONMIN.R`-fitTest_observed$`13w.CONMIN.RC`,
+  CM.RC.13w<-fitTest_observed$`13w.CONMIN.R`-fitTest_observed$`13w.CONMIN.C`,
+  CM.RCC.13w<-fitTest_observed$`13w.CONMIN.RC`-fitTest_observed$`13w.CONMIN.C`,
+  BD.CM.4w<-(fitTest_observed$`4w.BIODYN.C`+fitTest_observed$`4w.BIODYN.R`+fitTest_observed$`4w.BIODYN.RC`)-
+    (fitTest_observed$`4w.CONMIN.C`+fitTest_observed$`4w.CONMIN.R`+fitTest_observed$`4w.CONMIN.RC`),
+  BD.CM.13w<-(fitTest_observed$`13w.BIODYN.C`+fitTest_observed$`13w.BIODYN.R`+fitTest_observed$`13w.BIODYN.RC`)-
+    (fitTest_observed$`13w.CONMIN.C`+fitTest_observed$`13w.CONMIN.R`+fitTest_observed$`13w.CONMIN.RC`))
+
+colnames2<-c("BD.RRC.4w", "BD.RC.4w", "BD.RCC.4w", "CM.RRC.4w", "CM.RC.4w","CM.RCC.4w", "BD.RRC.13w", "BD.RC.13w", "BD.RCC.13w", "CM.RRC.13w" ,"CM.RC.13w", "CM.RCC.13w", "BD.CM.4w", "BD.CM.13w")
+colnames(contrastObserved)<-colnames2
+
+round_df <- function(df, digits) {
+  nums <- vapply(df, is.numeric, FUN.VALUE = logical(1))
+  
+  df[,nums] <- round(df[,nums], digits = digits)
+  
+  (df)
+}
+
+#get the effect size data with 95% CrI
+contrasts_observed <- t(round_df(plyr::colwise(quantile)(as.data.frame(contrastObserved), 
+                                                         probs = c(0.5,0.025,0.975)),2))
+
 # BRMS model for Shannon index 
 
 shannon_brms <-brm(formula = (Shannon)~time*treatment*farming_system+(1|block/plot),
@@ -275,6 +319,40 @@ round(quantile(diff_brms_shannon_T3, probs=c(0.025, 0.5, 0.975)),2)
 #this is a result
 mean(diff_brms_shannon_T3)
 
+# Comparisons for Shannon
+
+#calculate treatment effects
+fitTest_shannon<-fitted(shannon_brms,
+                        newdata = newdat,
+                        summary = F,
+                        re_formula = NA)
+
+fitTest_shannon<-as.data.frame(fitTest_shannon)
+colnames(fitTest_shannon) <- interaction(newdat$time, newdat$farming_system, newdat$treatment)
+
+contrastShannon<-cbind(
+  BD.RRC.4w<-fitTest_shannon$`4w.BIODYN.R`-fitTest_shannon$`4w.BIODYN.RC`,
+  BD.RC.4w<-fitTest_shannon$`4w.BIODYN.R`-fitTest_shannon$`4w.BIODYN.C`,
+  BD.RCC.4w<-fitTest_shannon$`4w.BIODYN.RC`-fitTest_shannon$`4w.BIODYN.C`,
+  CM.RRC.4w<-fitTest_shannon$`4w.CONMIN.R`-fitTest_shannon$`4w.CONMIN.RC`,
+  CM.RC.4w<-fitTest_shannon$`4w.CONMIN.R`-fitTest_shannon$`4w.CONMIN.C`,
+  CM.RCC.4w<-fitTest_shannon$`4w.CONMIN.RC`-fitTest_shannon$`4w.CONMIN.C`,
+  BD.RRC.13w<-fitTest_shannon$`13w.BIODYN.R`-fitTest_shannon$`13w.BIODYN.RC`,
+  BD.RC.13w<-fitTest_shannon$`13w.BIODYN.R`-fitTest_shannon$`13w.BIODYN.C`,
+  BD.RCC.13w<-fitTest_shannon$`13w.BIODYN.RC`-fitTest_shannon$`13w.BIODYN.C`,
+  CM.RRC.13w<-fitTest_shannon$`13w.CONMIN.R`-fitTest_shannon$`13w.CONMIN.RC`,
+  CM.RC.13w<-fitTest_shannon$`13w.CONMIN.R`-fitTest_shannon$`13w.CONMIN.C`,
+  CM.RCC.13w<-fitTest_shannon$`13w.CONMIN.RC`-fitTest_shannon$`13w.CONMIN.C`,
+  BD.CM.4w<-(fitTest_shannon$`4w.BIODYN.C`+fitTest_shannon$`4w.BIODYN.R`+fitTest_shannon$`4w.BIODYN.RC`)-
+    (fitTest_shannon$`4w.CONMIN.C`+fitTest_shannon$`4w.CONMIN.R`+fitTest_shannon$`4w.CONMIN.RC`),
+  BD.CM.13w<-(fitTest_shannon$`13w.BIODYN.C`+fitTest_shannon$`13w.BIODYN.R`+fitTest_shannon$`13w.BIODYN.RC`)-
+    (fitTest_shannon$`13w.CONMIN.C`+fitTest_shannon$`13w.CONMIN.R`+fitTest_shannon$`13w.CONMIN.RC`))
+
+colnames(contrastShannon)<-colnames2
+
+#get the effect size data with 95% CrI
+contrasts_shannon <- t(round_df(plyr::colwise(quantile)(as.data.frame(contrastShannon), 
+                                                        probs = c(0.025, 0.5, 0.975)),2))
 
 # add figure for water
 
@@ -345,7 +423,7 @@ summary(brms_water)
 #marginal effects
 marginal_effects(brms_water)
 
-## plot BRMS water
+## BRMS summary water
 
 newdat_water <- expand.grid(
   time = factor(c("4w", "13w"),levels=levels(water_summary$time)), 
@@ -366,26 +444,6 @@ water_summary$treatment<-factor(water_summary$treatment, levels=c("R", "RC", "C"
 
 #prepare and extract results table
 fitdf_water<-fitdf_water_plot[, c("farming_system","treatment", "time", "Estimate","Q2.5","Q97.5")]
-
-#make the final plot, without raw data
-fitted_water<-ggplot(data = fitdf_water_plot, 
-                     aes(x = farming_system,
-                         y = Estimate,
-                         color = treatment,
-                         shape=treatment)) +
-  geom_point(size=6,position=pos.dodge) +
-  geom_errorbar(aes(ymin=Q2.5,
-                    ymax=Q97.5),
-                width=0,
-                position=pos.dodge,
-                size=1.2, show.legend = F) +
-  scale_color_manual(values=wes_palette(n=3, name="Moonrise2"), name  ="") +
-  scale_shape_manual(values = c(15, 17, 19),name  ="")+
-  xlab("Farming system")+
-  facet_grid(~time)+ 
-  ylab("Observed ASV")+theme_bw()
-
-## BRMS summary water
 
 #get location of the means including credible intervals from here:
 fitdf_water_plot<-as.data.frame(fitdf_water_plot)
@@ -429,3 +487,38 @@ diff_brms_water_T3<-(BIODYN_brms_water_T3-CONMIN_brms_water_T3)
 round(quantile(diff_brms_water_T3, probs=c(0.025, 0.5, 0.975)),2)
 #this is a clear result, it includes zero so its likely that there is no difference
 mean(diff_brms_water_T3)
+
+# Comparisons for soil moisture
+
+#calculate treatment effects
+fitTest<-fitted(brms_water,
+                newdata = newdat_water,
+                summary = F,
+                re_formula = NA)
+
+fitTest<-as.data.frame(fitTest)
+colnames(fitTest) <- interaction(newdat_water$time, newdat_water$farming_system, newdat_water$treatment)
+
+contrastWaterNew<-cbind(
+  BD.RRC.4w<-fitTest$`4w.BIODYN.R`-fitTest$`4w.BIODYN.RC`,
+  BD.RC.4w<-fitTest$`4w.BIODYN.R`-fitTest$`4w.BIODYN.C`,
+  BD.RCC.4w<-fitTest$`4w.BIODYN.RC`-fitTest$`4w.BIODYN.C`,
+  CM.RRC.4w<-fitTest$`4w.CONMIN.R`-fitTest$`4w.CONMIN.RC`,
+  CM.RC.4w<-fitTest$`4w.CONMIN.R`-fitTest$`4w.CONMIN.C`,
+  CM.RCC.4w<-fitTest$`4w.CONMIN.RC`-fitTest$`4w.CONMIN.C`,
+  BD.RRC.13w<-fitTest$`13w.BIODYN.R`-fitTest$`13w.BIODYN.RC`,
+  BD.RC.13w<-fitTest$`13w.BIODYN.R`-fitTest$`13w.BIODYN.C`,
+  BD.RCC.13w<-fitTest$`13w.BIODYN.RC`-fitTest$`13w.BIODYN.C`,
+  CM.RRC.13w<-fitTest$`13w.CONMIN.R`-fitTest$`13w.CONMIN.RC`,
+  CM.RC.13w<-fitTest$`13w.CONMIN.R`-fitTest$`13w.CONMIN.C`,
+  CM.RCC.13w<-fitTest$`13w.CONMIN.RC`-fitTest$`13w.CONMIN.C`,
+  BD.CM.4w<-(fitTest$`4w.BIODYN.C`+fitTest$`4w.BIODYN.R`+fitTest$`4w.BIODYN.RC`)-
+    (fitTest$`4w.CONMIN.C`+fitTest$`4w.CONMIN.R`+fitTest$`4w.CONMIN.RC`),
+  BD.CM.13w<-(fitTest$`13w.BIODYN.C`+fitTest$`13w.BIODYN.R`+fitTest$`13w.BIODYN.RC`)-
+    (fitTest$`13w.CONMIN.C`+fitTest$`13w.CONMIN.R`+fitTest$`13w.CONMIN.RC`))
+
+colnames(contrastWaterNew)<-colnames2
+
+#get the effect size data with 95% CrI
+contrasts_water <- t(round_df(plyr::colwise(quantile)(as.data.frame(contrastWaterNew), 
+                                                      probs = c(0.025, 0.5, 0.975)),2))
