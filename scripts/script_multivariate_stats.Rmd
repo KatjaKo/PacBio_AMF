@@ -176,6 +176,33 @@ unite_ASV_rel <- transform_sample_counts(physeq_unite_Filtered_ASV, function(x) 
 
 ```
 
+## PCoA ASV level
+
+```{r PCoA for ASV level}
+
+#pcoa
+GP.ord1 <- ordinate(unite_ASV_rel, "PCoA", "bray")
+GP.ord1_bray <- phyloseq::distance(unite_ASV_rel, method = "bray")
+
+GP.ord1_meta <- as(sample_data(unite_ASV_rel), "data.frame")
+
+plot_ASV <- plot_ordination(unite_ASV_rel, GP.ord1, type="samples", color="treatment", shape="time") + geom_point(size=5)
+
+plot_ASV <- plot_ASV + scale_colour_manual(values = c("#B6854D", "#8D8680", "#0F0D0E")) + labs(colour = "Drought treatment", shape="Sampling time") + theme_bw() + theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), panel.background = element_blank(), axis.line = element_line(colour = "black")) +xlab("PCoA1 (8%)") +ylab("PCoA2 (4%)")
+
+#permanova
+
+set.seed(7674)
+perm.ASV <- adonis2(GP.ord1_bray ~ treatment+time+farming_system+
+          farming_system:treatment+
+          treatment:time+
+          time:farming_system,
+          strata=GP.ord1_meta$block,
+          data = GP.ord1_meta,permutations = 999)
+perm.ASV
+
+```
+
 # COMMUNITY COMPOSITION 
 + here I explore the community composition on genus level
 + agglomerate on genus level
