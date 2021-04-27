@@ -1,0 +1,273 @@
+---
+title: "plot_figures"
+author: "Katja Kozjek"
+date: "27/04/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r load packages, echo=F}
+
+library(ggplot2)
+library(ggrepel)
+library(phyloseq)
+library(dplyr)
+library(tidyr)
+library(tidyverse)
+library(scales)
+library(wesanderson)
+library(cowplot)
+library(ggpubr)
+
+```
+
+#plot indicator species 
+
+```{r prepare data with indicators, echo=F}
+
+se <- function(x) sqrt(var(x)/length(x))
+OTUr_ind = transform_sample_counts(otu_table(physeq_AMF), function(x) x/sum(x))
+main_asv <- read.table("data/csv/asv_list.tsv", header = T)
+
+asv_table <- as.data.frame(t(as(otu_table(OTUr_ind), "matrix")))
+md <- as.data.frame(as(sample_data(physeq_AMF), "matrix"))
+md <- md[,1:6]
+asv_tax <- as.data.frame(tax_table(physeq_AMF))
+
+asv_long <- asv_table %>%
+  rownames_to_column(var = "ASV") %>%
+  gather(Sample_Name, rel_abund, -ASV) %>%
+  filter(ASV %in% main_asv$ASV) %>%
+  full_join((md %>% rownames_to_column(var = "Sample_Name")), by = "Sample_Name")
+
+```
+
+##indicators for farming system 
+
+```{r farming system, echo=F}
+
+farm <- asv_long %>%
+  group_by(ASV, farming_system) %>% 
+  summarise(mean=mean(rel_abund),se=se(rel_abund)) %>%
+  filter(ASV %in% main_asv[main_asv$Association == "CONMIN",]$ASV) %>%
+  left_join((asv_tax %>% rownames_to_column(var = "ASV")), by = "ASV") %>%
+  filter(farming_system == "CONMIN") %>%
+  left_join(main_asv, by = "ASV") %>%
+  filter(Association == "CONMIN") %>%
+  mutate(MajVar = "Farming system") %>%
+  select(ASV, mean, se, Family, Association, IndVal, MajVar)
+
+```
+
+##indicators for the drought treatment 
+
+```{r drought, echo=F}
+
+drought <- asv_long %>%
+  group_by(ASV, treatment) %>% 
+  summarise(mean=mean(rel_abund),se=se(rel_abund)) %>%
+  filter(ASV %in% main_asv[(main_asv$Association == "Control") | (main_asv$Association == "Roof"),]$ASV) %>%
+  filter(treatment != "RC") %>%
+  left_join((asv_tax %>% rownames_to_column(var = "ASV")), by = "ASV") %>%
+  filter(mean > 0.001) %>%
+  left_join(main_asv, by = "ASV") %>%
+  mutate(MajVar = "Drought treatment") %>%
+  select(ASV, mean, se, Family, Association, IndVal, MajVar)
+
+```
+
+##indicators for the time 
+
+```{r time, echo=F}
+
+time_point <- asv_long %>%
+  group_by(ASV, time) %>% 
+  summarise(mean=mean(rel_abund),se=se(rel_abund)) %>%
+  filter(ASV %in% main_asv[(main_asv$Association == "4w") | (main_asv$Association == "13w"),]$ASV) %>%
+  left_join((asv_tax %>% rownames_to_column(var = "ASV")), by = "ASV") %>%
+  filter(mean > 0.0025) %>%
+  left_join(main_asv, by = "ASV") %>%
+  mutate(MajVar = "Sampling time") %>%
+  filter(Association != "CONMIN") %>%
+  select(ASV, mean, se, Family, Association, IndVal, MajVar)
+
+```
+
+##plot indicators
+
+```{r main plot for indicators, echo=F}
+
+main_data <- rbind(farm, drought, time_point)
+
+main_data$ASV <- factor(main_data$ASV,levels = c("ASV_19", "ASV_203", "ASV_27", "ASV_28", "ASV_14", "ASV_126", "ASV_176", "ASV_8", "ASV_34", "ASV_255"))
+main_data$MajVar <- factor(main_data$MajVar,levels = c("Farming system", "Drought treatment", "Sampling time"))
+main_data$Association <- factor(main_data$Association, levels = c("CONMIN", "Control", "Roof", "4w", "13w"), labels = c("CONMIN", "Control", "Roof", "4 weeks", "13 weeks")) 
+
+main_plot <- ggplot(main_data, aes(x = mean, y = reorder(ASV, mean), color = Family)) +
+  geom_point(aes(size = IndVal, shape = Association, fill = Family)) +
+  geom_errorbarh(aes(xmin=mean-se, xmax=mean+se), height=.2,show.legend = F) +
+  facet_grid(MajVar ~ ., scales = "free", space = "free") +
+  scale_x_continuous(name = "Relative abundance") + scale_y_discrete("ASV") +
+  scale_shape_manual(values = c(21,22,23,24,25)) +
+  theme_bw() + 
+  theme(panel.grid.minor = element_blank(), panel.grid.major = element_blank()) +
+  scale_color_manual(values = c("#CEAB07","#35274A","#46ACC8","#DD8D29", 
+                               "#02401B","#9986A5"), name="AMF family", 
+                     breaks=c("f__Acaulosporaceae","f__Ambisporaceae","f__Archaeosporaceae",
+                              "f__Claroideoglomeraceae", "f__Glomeraceae","f__Paraglomeraceae"),                                 labels=c("Acaulosporaceae","Ambisporaceae","Archaeosporaceae","Claroideoglomeraceae",                                "Glomeraceae", "Paraglomeraceae")) + scale_fill_manual(values =                                           c("#CEAB07","#35274A","#46ACC8","#DD8D29", 
+                               "#02401B","#9986A5"), name="AMF family", 
+                    breaks=c("f__Acaulosporaceae","f__Ambisporaceae","f__Archaeosporaceae",
+                             "f__Claroideoglomeraceae", "f__Glomeraceae", "f__Paraglomeraceae"),                                labels=c("Acaulosporaceae", "Ambisporaceae", "Archaeosporaceae", "Claroideoglomeraceae",                              "Glomeraceae", "Paraglomeraceae")) + guides(size = guide_legend(order=1),
+         shape = guide_legend(order=2), color = guide_legend(override.aes = list(size=3)))
+
+print(main_plot)
+
+```
+
+#abundance plot on genus level 
+
+```{r genus abundance, echo=F}
+
+genusAMF_abundance <- ggplot(data_genera) + geom_col(mapping = aes(x = treatment, y = Abundance, fill = Genus), position = "fill", show.legend = TRUE) + scale_x_discrete(name ="Drought treatment") + scale_fill_manual(values = c("#CEAB07","#35274A","#46ACC8","#DD8D29","#8D8680","#81A88D","#79402E","#F2AD00","#02401B","#EAD3BF","#9986A5","#FD6467"), name="AMF genera", breaks=c("g__Acaulospora", "g__Ambispora", "g__Archaeospora", "g__Claroideoglomus", "g__Diversispora", "g__Dominikia", "g__Funneliformis", "g__Gigaspora", "g__Glomus", "g__Palaeospora", "g__Paraglomus", "g__Septoglomus"), labels=c("Acaulospora", "Ambispora", "Archaeospora", "Claroideoglomus", "Diversispora", "Dominikia", "Funneliformis", "Gigaspora", "Glomus", "Palaeospora", "Paraglomus", "Septoglomus")) + ylab("Relative abundance") + theme_bw() + theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), panel.background = element_blank(), axis.line = element_line(colour = "black")) + facet_wrap(time~farming_system)
+
+print(genusAMF_abundance)
+
+```
+
+#dbRDA plot genera + factors
+
+```{r plot genus dbrda, echo=F}
+
+plot_dbrda <- ggplot(df1, aes(x=dbRDA1, y=dbRDA2)) + 
+              geom_text_repel(aes(label=rownames(df1)),
+              size = 5, point.padding = 0.5, box.padding  = 0.35,
+              min.segment.length = 0, segment.color = "black") + 
+              geom_hline(yintercept=0, linetype="dotted") +
+              geom_vline(xintercept=0, linetype="dotted") +
+              coord_fixed() + theme_bw() + geom_segment(data=df1, aes(x=0, xend=dbRDA1, y=0, yend=dbRDA2),
+              color="black", arrow=arrow(length=unit(0.01,"npc"))) + 
+              xlab("dbRDA1 (18.5%)") + ylab("dbRDA2 (7.7% )") + 
+              theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), 
+                    panel.background = element_blank(), axis.line = element_line(colour = "black")) +
+              theme(axis.text.x = element_text(face="bold", size=11, color="black"), 
+                    axis.text.y = element_text(face="bold", size=11, color="black"),
+                    axis.title.x = element_text(size=12, face="bold"),
+                    axis.title.y = element_text(size=12, face="bold"))
+
+en_coord_test <- en_coord_cat_dbrda %>% 
+rownames_to_column("parameter")
+
+```
+
+##use rda_points and add factors
+
+```{r genus as dot, echo=F}
+
+#rda points are colored genera
+
+df1_genus <- df1 %>% 
+rownames_to_column("Genus")
+
+rda_points <- ggplot(df1, aes(x=dbRDA1, y=dbRDA2)) + 
+              geom_point(data =df1_genus, aes(x = dbRDA1, y = dbRDA2, 
+              colour=Genus), size=6) + 
+              scale_color_manual(values =                 c("#CEAB07","#35274A","#46ACC8","#DD8D29","#8D8680","#81A88D","#79402E","#F2AD00","#02401B","#EAD3BF",                        "#9986A5","#FD6467"), name="AMF genera") +
+              geom_hline(yintercept=0, linetype="dotted") +
+              geom_vline(xintercept=0, linetype="dotted") +
+              coord_fixed() + theme_bw() + xlab("dbRDA1 (18.5%)") + ylab("dbRDA2 (7.7% )") + 
+              theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+              panel.background = element_blank(), axis.line = element_line(colour = "black"))
+
+```
+
+```{r dbRDA additional, echo=F}
+
+#factors without text, only with shape
+plot_dbrda_taxa_add2 <- rda_points + theme(axis.text.x = element_text(face="bold", size=9, color="black"), axis.text.y =                                           element_text(face="bold", size=9, color="black"),
+          axis.title.x = element_text(size=10, face="bold"),
+          axis.title.y = element_text(size=10, face="bold")) + 
+  geom_point(data = en_coord_test, aes(x = dbRDA1, y = dbRDA2, 
+  shape=parameter), size = 8, alpha = 0.8, colour = "black") +    
+    scale_shape_manual(values = c(25,24,22,21)) + labs(shape="Association") + ylim(-0.6,0.8)
+
+```
+
+##dbRDA plot + environment 
+
+```{r dbrda plot with the soil parameters, echo=F}
+
+#with preselected environmental variables 
+plot_dbrda_env <- rda_points + geom_segment(data = sig.env_dbrda,
+                          aes(x = 0, xend = dbRDA1,
+                              y = 0, yend = dbRDA2),
+                          arrow = arrow(length = unit(2.5, "mm")),
+                          colour = "black",
+                          alpha=0.5,
+                          size=0.4,
+                          lineend ="round",
+                          linejoin="round") + 
+                          ggrepel::geom_text_repel(data = sig.env_dbrda,
+                                                   aes(x=dbRDA1, y=dbRDA2, 
+                                                       label=env.variables), 
+                          cex = 4, color="gray10", direction = "both", segment.size = 0.25) +
+                          theme(axis.text.x = element_text(face="bold", size=9, color="black"), 
+                                axis.text.y = element_text(face="bold", size=9, color="black"),
+                                axis.title.x = element_text(size=10, face="bold"),
+                                axis.title.y = element_text(size=10, face="bold")) + ylim(-0.6,0.8) + theme(legend.position = "none")
+
+print(plot_dbrda_env)
+
+```
+
+##merge dbrda plot for the manuscript 
+
+```{r use ggarrange to merge plots, echo=F}
+
+#shared legend
+#align, both plots have the same size
+dbrda.merged_add2 <- ggarrange(plot_dbrda_taxa_add2, plot_dbrda_env, labels = c("a)", "b)"), ncol = 2, common.legend = TRUE, legend = "right", align = "hv", vjust = 11, hjust = -3)
+
+```
+
+# plot diversity 
+
+```{r diversity plots, echo=F}
+
+#Shannon
+
+fitdf_shannon_plot$time <- factor(fitdf_shannon_plot$time, levels=c("4w", "13w"), labels = c("4 weeks", "13 weeks"))
+
+plot_shannon <- ggplot(data=fitdf_shannon_plot, aes(x=farming_system, y=Estimate)) +
+  geom_point(aes(color = treatment), size=2, position = pos.dodge) +
+  geom_errorbar(aes(ymin=Q2.5,
+                    ymax=Q97.5, color = treatment),
+                width=0.2, position = pos.dodge) +
+  scale_color_manual(values = c("#B6854D", "#8D8680", "#0F0D0E")) +
+  xlab("Farming system") +
+  facet_grid(~time) + labs(color = "Drought treatment") +
+  ylab("Shannon index")+theme_bw()
+
+#Observed
+
+fitdf_observed_plot$time <- factor(fitdf_observed_plot$time, levels=c("4w", "13w"), labels = c("4 weeks", "13 weeks"))
+
+plot_observed <- ggplot(data = fitdf_observed_plot, 
+                     aes(x = farming_system,
+                         y =Estimate)) +
+  geom_point(aes(color = treatment), size=2, position = pos.dodge) +
+  geom_errorbar(aes(ymin=Q2.5,
+                    ymax=Q97.5, color = treatment),
+                width=0.2,
+                position=pos.dodge) +
+  scale_color_manual(values = c("#B6854D", "#8D8680", "#0F0D0E")) +
+  xlab("Farming system")+
+  facet_grid(~time) + labs(color = "Drought treatment") +
+  ylab("Observed ASVs")+theme_bw()
+
+alpha_div_plot <- ggarrange(plot_observed, plot_shannon, labels = c("a)", "b)"), ncol = 1, common.legend = TRUE, legend = "right")
+
+```
