@@ -455,24 +455,19 @@ print(dbrda_original)
 
 names(veganSample_AMF_genus)
 env_dbrda <- veganSample_AMF_genus[,2:25]
-env_dbrda <- env_dbrda[,-c(2,3,4,7)]
+
+#preselect parameters
+env_dbrda <- env_dbrda[,-c(2,3,4,7,9,10,12,14,16,20,22,23,24)]
 names(env_dbrda)
 
 #rename environmental parameters
 names(env_dbrda)[names(env_dbrda) == "total.P"] <- "total P"
-names(env_dbrda)[names(env_dbrda) == "total.N"] <- "total N"
 names(env_dbrda)[names(env_dbrda) == "total.C"] <- "total C"
-names(env_dbrda)[names(env_dbrda) == "total.C"] <- "total C"
-names(env_dbrda)[names(env_dbrda) == "C.N"] <- "C:N ratio"
 names(env_dbrda)[names(env_dbrda) == "NLFA"] <- "AMF biomass"
 names(env_dbrda)[names(env_dbrda) == "N.roots"] <- "N roots"
 names(env_dbrda)[names(env_dbrda) == "C.roots"] <- "C roots"
 names(env_dbrda)[names(env_dbrda) == "crop.biomass"] <- "crop biomass"
 names(env_dbrda)[names(env_dbrda) == "weed.cover"] <- "weed cover"
-names(env_dbrda)[names(env_dbrda) == "plant.height"] <- "plant height"
-names(env_dbrda)[names(env_dbrda) == "N.shoots"] <- "N shoots"
-names(env_dbrda)[names(env_dbrda) == "C.shoots"] <- "C shoots"
-names(env_dbrda)[names(env_dbrda) == "root.DW"] <- "root DW"
 
 #sites (=my samples)
 data.scores_dbrda = as.data.frame(scores(dbrda, display = 'sites')) #save to dataframe
