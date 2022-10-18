@@ -1,7 +1,7 @@
 ### AMF communities under simulated short-term drought in a long-term farming experiment with organic and conventional management practices.
 This repository contains all the codes and other documents related to the processing of CCS reads to ASVs using DADA2
 
-Kozjek K, et. al. (2022): Long-term agricultural management impacts arbuscular mycorrhizal fungi more than short-term experimental drought. Applied Soil Ecology. 
+Kozjek K, et. al. (2021): Long-term agricultural management impacts arbuscular mycorrhizal fungi more than short-term experimental drought. Applied Soil Ecology. 
 http://doi.org/10.1016/j.apsoil.2021.104140 
 
 #### - Scripts
